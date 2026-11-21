@@ -2,17 +2,20 @@ services:
   - type: web
     name: assistente-ia
     runtime: node
-    plan: starter
+    # Plano grátis: bom para testar. Adormece após 15 min sem uso e perde os
+    # dados (definições e chamadas) quando reinicia. Para atender chamadas a
+    # sério, muda para "starter" e descomenta o disco e o DATA_DIR abaixo.
+    plan: free
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /saude
-    disk:
-      name: dados
-      mountPath: /var/data
-      sizeGB: 1
+    # disk:
+    #   name: dados
+    #   mountPath: /var/data
+    #   sizeGB: 1
     envVars:
-      - key: DATA_DIR
-        value: /var/data
+      # - key: DATA_DIR
+      #   value: /var/data
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: PAINEL_SENHA
