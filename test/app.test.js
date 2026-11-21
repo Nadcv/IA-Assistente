@@ -491,6 +491,15 @@ test("calendário: as tarefas do telemóvel ficam num link .ics secreto", async 
   assert.doesNotMatch(ics, /Já feita|Sem data/);
 
   assert.equal((await fetch(base + "/calendario/00000000000000000000000000000000.ics")).status, 404);
+
+  // Uma só tarefa (botão 📅): o Safari mostra "Adicionar ao calendário".
+  r = await fetch(base + caminho.replace(/\.ics$/, "/tarefa.ics") + "?id=1");
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-disposition"), /inline/);
+  const uma = await r.text();
+  assert.match(uma, /SUMMARY:Pagar a luz/);
+  assert.equal((uma.match(/BEGIN:VEVENT/g) || []).length, 1);
+  assert.equal((await fetch(base + caminho.replace(/\.ics$/, "/tarefa.ics") + "?id=999")).status, 404);
 });
 
 test("Gemini sem quota: muda logo para outro modelo (cada um tem a sua quota grátis)", async () => {

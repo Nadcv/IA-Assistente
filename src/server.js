@@ -188,6 +188,16 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
     res.type("text/calendar; charset=utf-8").send(calendarioICS(armazem.lerTarefas(), nome));
   });
 
+  // Uma só tarefa (o Safari abre e mostra "Adicionar ao calendário").
+  app.get("/calendario/:token/tarefa.ics", (req, res) => {
+    if (!senha || !igual(req.params.token, tokenCalendario)) return res.sendStatus(404);
+    const t = armazem.lerTarefas().find((x) => x.id === String(req.query.id || ""));
+    if (!t || !t.quando) return res.status(404).send("Tarefa não encontrada. Abre a app e tenta outra vez.");
+    const nome = armazem.lerConfig().nomeAssistente || "Íris";
+    res.set("Content-Disposition", 'inline; filename="tarefa.ics"');
+    res.type("text/calendar; charset=utf-8").send(calendarioICS([{ ...t, feita: false }], nome));
+  });
+
   // Testa a ligação à IA com um pedido pequeno (botão nas Definições).
   app.post("/api/testar-ia", exigirLogin, async (req, res) => {
     const info = ia.diagnostico ? ia.diagnostico() : {};

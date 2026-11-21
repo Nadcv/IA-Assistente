@@ -548,17 +548,6 @@ function juntarTarefa(titulo, quando, notas) {
   tarefas.push({ id: Date.now() + Math.random(), titulo, quando: d && !isNaN(d) ? d.toISOString() : "", notas: notas || "", feita: false });
   guardar("tarefas", tarefas); mostrarTarefas();
 }
-function ficheiroICS(t) {
-  const f = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-  const inicio = new Date(t.quando);
-  const fim = new Date(inicio.getTime() + 30 * 60000);
-  const esc = (x) => String(x).replace(/[\\;,]/g, (c) => "\\" + c).replace(/\n/g, "\\n");
-  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Assistente IA//PT", "BEGIN:VEVENT",
-    "UID:" + t.id + "@assistente-ia", "DTSTAMP:" + f(new Date()), "DTSTART:" + f(inicio), "DTEND:" + f(fim),
-    "SUMMARY:" + esc(t.titulo), t.notas ? "DESCRIPTION:" + esc(t.notas) : "",
-    "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:" + esc(t.titulo), "TRIGGER:-PT0M", "END:VALARM",
-    "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
-}
 function mostrarTarefas() {
   const lista = $("#listaTarefas");
   if (!tarefas.length) { lista.replaceChildren(el("p", { className: "mut", textContent: "Sem tarefas. 🎉" })); return; }
@@ -571,10 +560,15 @@ function mostrarTarefas() {
     const botoes = [apagar];
     if (t.quando && !t.feita) {
       const cal = el("button", { textContent: "📅" });
-      cal.onclick = () => {
-        const url = URL.createObjectURL(new Blob([ficheiroICS(t)], { type: "text/calendar" }));
-        const a = el("a", { href: url, download: "tarefa.ics" }); document.body.append(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      cal.onclick = async () => {
+        if (iPhoneForaDoSafari) {
+          alert("No iPhone, só o Safari adiciona eventos ao calendário. Abre esta app no Safari, ou usa \"Ligar ao calendário\" para as tarefas aparecerem sozinhas.");
+          return;
+        }
+        try {
+          const url = await obterLinkCalendario();
+          location.href = url.replace(/\.ics$/, "/tarefa.ics") + "?id=" + encodeURIComponent(String(t.id));
+        } catch (err) { alert(err.message); }
       };
       botoes.unshift(cal);
     }
@@ -587,18 +581,36 @@ function mostrarTarefas() {
       ...botoes);
   }));
 }
+// No iPhone, só o Safari sabe abrir links de calendário.
+const iPhoneForaDoSafari = /iPhone|iPad/.test(navigator.userAgent) && /CriOS|FxiOS|EdgiOS|GSA|OPiOS/.test(navigator.userAgent);
+let linkCalendario = null;
+async function obterLinkCalendario() {
+  await sincronizarTarefas();
+  if (!linkCalendario) linkCalendario = (await api("/api/calendario-link")).url;
+  return linkCalendario;
+}
 $("#ligarCalendario").onclick = async () => {
+  const info = $("#infoCalendario");
   try {
-    await sincronizarTarefas();
-    const { url } = await api("/api/calendario-link");
+    const url = await obterLinkCalendario();
     const webcal = url.replace(/^https?:/, "webcal:");
-    $("#infoCalendario").replaceChildren(
-      "Se nada abrir, copia este link e adiciona-o no telemóvel como calendário subscrito: ",
-      el("a", { href: webcal, textContent: "abrir", style: "color:var(--ac)" }), " · ",
-      Object.assign(el("button", { textContent: "📋 Copiar link" }), { onclick: (e) => { navigator.clipboard.writeText(url); e.target.textContent = "✅ Copiado"; } }),
-    );
-    location.href = webcal;
-  } catch (err) { $("#infoCalendario").textContent = err.message; }
+    const copiar = el("button", { textContent: "📋 Copiar link do calendário" });
+    copiar.onclick = async () => {
+      try { await navigator.clipboard.writeText(url); copiar.textContent = "✅ Link copiado"; }
+      catch { prompt("Copia este link:", url); }
+    };
+    const passos = el("ol", { style: "padding-left:20px; margin:8px 0" },
+      el("li", { textContent: "Toca em \"Copiar link do calendário\" (acima)." }),
+      el("li", { textContent: "Abre as Definições do iPhone → Calendário → Contas → Adicionar conta → Outra." }),
+      el("li", { textContent: "Toca em \"Adicionar calendário subscrito\", cola o link e toca em Seguinte → Guardar." }),
+      el("li", { textContent: "Em Contas → Subscritos → este calendário: põe \"Obter\" a cada 15 minutos e desliga \"Remover alertas\"." }));
+    const auto = el("a", { href: webcal, className: "prim", textContent: "⚡ Subscrever automaticamente (Safari)",
+      style: "display:inline-block; margin-top:6px; padding:10px 14px; border-radius:10px; background:var(--ac); color:#0f172a; text-decoration:none; font-weight:600" });
+    info.replaceChildren(
+      iPhoneForaDoSafari ? el("p", { className: "nota", textContent: "⚠️ Estás no Chrome (ou outro browser). No iPhone só o Safari adiciona calendários sozinho — usa os passos abaixo, ou abre esta app no Safari." }) : "",
+      copiar, passos, el("p", { className: "mut", textContent: "Ou, no Safari, toca aqui e confirma \"Subscrever\":" }), auto,
+      el("p", { className: "mut", textContent: "Android: Google Calendar no computador → Outros calendários → + → A partir de URL → cola o link." }));
+  } catch (err) { info.textContent = err.message; }
 };
 $("#juntarTarefa").onclick = () => {
   const v = $("#quandoTarefa").value;
