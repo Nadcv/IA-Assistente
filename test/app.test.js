@@ -8,7 +8,7 @@ process.env.TWILIO_VALIDAR = "false";
 const { criarApp } = await import("../src/server.js");
 const { criarArmazem, nomeDoContacto, estaNaLista } = await import("../src/armazem.js");
 const { redigir } = await import("../src/privacidade.js");
-const { criarIA, motorClaude, motorGemini, qualIA, custoIA, explicarErro, pensamentoGemini } = await import("../src/ia.js");
+const { criarIA, motorClaude, motorGemini, qualIA, custoIA, explicarErro, pensamentoGemini, pcmParaWav } = await import("../src/ia.js");
 
 let servidor, base, pasta, armazemTeste;
 const sms = [];
@@ -36,6 +36,9 @@ const iaFalsa = {
   },
   async sugerirResposta(config, { mensagem, imagem }) {
     return { sugestoes: [`Resposta a: ${mensagem}${imagem ? " +imagem" : ""}`, "B", "C"], nota: "" };
+  },
+  async falar(texto, voz) {
+    return Buffer.from(`WAV:${voz}:${texto}`);
   },
   async conversar(config, { historico, imagem }) {
     ultimaConversa = { historico, imagem };
@@ -426,4 +429,65 @@ test("Gemini responde depressa: pouco pensamento, e tira-o se o modelo não acei
   const r = await ia.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "Olá" }] });
   assert.equal(r.resposta, "Olá");
   assert.deepEqual(configs, [{ thinkingLevel: "MINIMAL" }, undefined]);
+});
+
+test("voz natural: devolve áudio WAV", async () => {
+  const h = await entrar();
+  const r = await fetch(base + "/api/voz", { method: "POST", headers: h, body: JSON.stringify({ texto: "Olá", voz: "Kore" }) });
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("content-type"), "audio/wav");
+  assert.equal(await r.text(), "WAV:Kore:Olá");
+  const semLogin = await fetch(base + "/api/voz", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  assert.equal(semLogin.status, 401);
+});
+
+test("Gemini TTS: escolhe o modelo de voz e junta o cabeçalho WAV", async () => {
+  let pedido;
+  const pcm = Buffer.alloc(480);
+  const clienteFalso = { models: {
+    async list() { return (async function* () {
+      yield { name: "models/gemini-2.5-flash" };
+      yield { name: "models/gemini-2.5-pro-preview-tts" };
+      yield { name: "models/gemini-2.5-flash-preview-tts" };
+    })(); },
+    async generateContent(p) {
+      pedido = p;
+      return { candidates: [{ content: { parts: [{ inlineData: { mimeType: "audio/L16;codec=pcm;rate=24000", data: pcm.toString("base64") } }] } }] };
+    },
+  } };
+  const ia = criarIA(motorGemini(clienteFalso, "gemini-2.5-flash"));
+  const wav = await ia.falar("Bom dia", "Charon");
+  assert.equal(pedido.model, "gemini-2.5-flash-preview-tts");
+  assert.deepEqual(pedido.config.responseModalities, ["AUDIO"]);
+  assert.equal(pedido.config.speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName, "Charon");
+  assert.equal(wav.subarray(0, 4).toString(), "RIFF");
+  assert.equal(wav.readUInt32LE(24), 24000);
+  assert.equal(wav.length, 44 + 480);
+  assert.equal(criarIA(motorClaude({})).falar, null);
+  assert.equal(pcmParaWav(Buffer.alloc(2)).subarray(8, 12).toString(), "WAVE");
+});
+
+test("calendário: as tarefas do telemóvel ficam num link .ics secreto", async () => {
+  const h = await entrar();
+  let r = await fetch(base + "/api/tarefas", { method: "PUT", headers: h, body: JSON.stringify({ tarefas: [
+    { id: 1, titulo: "Pagar a luz", quando: "2026-11-22T09:00:00Z", notas: "EDP", feita: false },
+    { id: 2, titulo: "Já feita", quando: "2026-11-22T10:00:00Z", feita: true },
+    { id: 3, titulo: "Sem data", quando: "" },
+    { id: 4, titulo: "", quando: "2026-11-22T10:00:00Z" },
+  ] }) });
+  assert.equal((await r.json()).total, 3);
+
+  const { url } = await (await fetch(base + "/api/calendario-link", { headers: h })).json();
+  const caminho = new URL(url).pathname;
+  assert.match(caminho, /^\/calendario\/[0-9a-f]{32}\.ics$/);
+  r = await fetch(base + caminho);
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type"), /text\/calendar/);
+  const ics = await r.text();
+  assert.match(ics, /SUMMARY:Pagar a luz/);
+  assert.match(ics, /DTSTART:20261122T090000Z/);
+  assert.match(ics, /BEGIN:VALARM/);
+  assert.doesNotMatch(ics, /Já feita|Sem data/);
+
+  assert.equal((await fetch(base + "/calendario/00000000000000000000000000000000.ics")).status, 404);
 });

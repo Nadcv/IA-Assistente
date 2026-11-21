@@ -10,6 +10,30 @@ import { rotasVoz } from "./voz.js";
 
 const aqui = path.dirname(fileURLToPath(import.meta.url));
 
+const icsData = (d) => new Date(d).toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+const icsTexto = (x) => String(x).replace(/[\\;,]/g, (c) => "\\" + c).replace(/\r?\n/g, "\\n");
+
+export function calendarioICS(tarefas, nome) {
+  const linhas = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Assistente IA//PT", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+    `X-WR-CALNAME:${icsTexto(nome)} — Tarefas`, "REFRESH-INTERVAL;VALUE=DURATION:PT15M", "X-PUBLISHED-TTL:PT15M",
+  ];
+  for (const t of tarefas) {
+    if (!t.quando || t.feita) continue;
+    const inicio = new Date(t.quando);
+    linhas.push(
+      "BEGIN:VEVENT", `UID:${icsTexto(t.id)}@assistente-ia`, `DTSTAMP:${icsData(new Date())}`,
+      `DTSTART:${icsData(inicio)}`, `DTEND:${icsData(inicio.getTime() + 30 * 60_000)}`,
+      `SUMMARY:${icsTexto(t.titulo)}`,
+      ...(t.notas ? [`DESCRIPTION:${icsTexto(t.notas)}`] : []),
+      "BEGIN:VALARM", "ACTION:DISPLAY", `DESCRIPTION:${icsTexto(t.titulo)}`, "TRIGGER:-PT0M", "END:VALARM",
+      "END:VEVENT",
+    );
+  }
+  linhas.push("END:VCALENDAR");
+  return linhas.join("\r\n") + "\r\n";
+}
+
 export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_SENHA } = {}) {
   armazem ??= criarArmazem();
   ia ??= criarIA();
@@ -117,6 +141,51 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
       console.error("Erro no assistente:", erro.status || "", erro.message);
       res.status(502).json({ erro: ia.explicarErro ? ia.explicarErro(erro) : "A IA não respondeu. Tenta outra vez." });
     }
+  });
+
+  // --- Voz natural: texto -> áudio WAV ---
+  app.post("/api/voz", exigirLogin, async (req, res) => {
+    if (!ia.falar) return res.status(501).json({ erro: "Voz natural só disponível com o Gemini." });
+    const texto = String(req.body?.texto || "").trim().slice(0, 1500);
+    if (!texto) return res.status(400).json({ erro: "Sem texto." });
+    try {
+      const wav = await ia.falar(texto, String(req.body?.voz || ""));
+      res.type("audio/wav").send(wav);
+    } catch (erro) {
+      console.error("Erro na voz natural:", erro.status || "", erro.message);
+      res.status(502).json({ erro: ia.explicarErro ? ia.explicarErro(erro) : "Sem voz." });
+    }
+  });
+
+  // --- Tarefas -> calendário do telemóvel (subscrição) ---
+  // O telemóvel envia as tarefas; o iPhone/Android subscreve um link secreto
+  // .ics e as tarefas aparecem sozinhas no calendário, com alerta.
+  const tokenCalendario = crypto.createHmac("sha256", segredo).update("calendario:" + (senha || "")).digest("hex").slice(0, 32);
+
+  app.put("/api/tarefas", exigirLogin, (req, res) => {
+    const lista = Array.isArray(req.body?.tarefas) ? req.body.tarefas.slice(0, 500) : [];
+    const limpas = lista
+      .filter((t) => t && typeof t.titulo === "string" && t.titulo.trim())
+      .map((t) => ({
+        id: String(t.id).slice(0, 40),
+        titulo: t.titulo.slice(0, 200),
+        quando: t.quando && !isNaN(Date.parse(t.quando)) ? new Date(t.quando).toISOString() : "",
+        notas: String(t.notas || "").slice(0, 1000),
+        feita: Boolean(t.feita),
+      }));
+    armazem.guardarTarefas(limpas);
+    res.json({ ok: true, total: limpas.length });
+  });
+
+  app.get("/api/calendario-link", exigirLogin, (req, res) => {
+    const base = (process.env.PUBLIC_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+    res.json({ url: `${base}/calendario/${tokenCalendario}.ics` });
+  });
+
+  app.get("/calendario/:token.ics", (req, res) => {
+    if (!senha || !igual(req.params.token, tokenCalendario)) return res.sendStatus(404);
+    const nome = armazem.lerConfig().nomeAssistente || "Íris";
+    res.type("text/calendar; charset=utf-8").send(calendarioICS(armazem.lerTarefas(), nome));
   });
 
   // Testa a ligação à IA com um pedido pequeno (botão nas Definições).

@@ -127,6 +127,7 @@ export function motorGemini(
   // Modelos a evitar: os que não existem (para sempre) e os ocupados (10 min).
   const evitar = new Map(); // nome -> até quando (ms)
   const aEvitar = () => [...evitar].filter(([, ate]) => ate > Date.now()).map(([n]) => n);
+  let modeloVoz = null;
   let semPensamento = false; // se o modelo recusar a configuração de pensamento
   const ehOcupado = (erro) => erro?.status >= 500 || /overloaded|unavailable|high demand/i.test(String(erro?.message));
   const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
@@ -169,6 +170,24 @@ export function motorGemini(
       }
       throw ultimo || Object.assign(new Error("timed out"), { name: "TimeoutError" });
     },
+    // Converte texto em fala natural. Devolve um Buffer WAV.
+    async falar(texto, voz = "Aoede") {
+      if (!modeloVoz) modeloVoz = process.env.GEMINI_TTS_MODEL || (await escolherModeloVoz(cliente));
+      if (!modeloVoz) throw Object.assign(new Error("Nenhum modelo de voz disponível para esta chave"), { status: 404 });
+      const resposta = await cliente.models.generateContent({
+        model: modeloVoz,
+        contents: [{ role: "user", parts: [{ text: `Lê em português de Portugal (sotaque de Lisboa), com voz natural, calorosa e descontraída, como uma pessoa real a falar com um amigo:\n\n${texto}` }] }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOZES_NATURAIS.includes(voz) ? voz : "Aoede" } } },
+          abortSignal: AbortSignal.timeout(30_000),
+        },
+      });
+      const parte = resposta.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
+      if (!parte) throw new Error("O Gemini não devolveu áudio");
+      const taxa = Number((parte.inlineData.mimeType || "").match(/rate=(\d+)/)?.[1]) || 24000;
+      return pcmParaWav(Buffer.from(parte.inlineData.data, "base64"), taxa);
+    },
     async _gerar({ system, messages, schema, effort, timeout, contador }) {
       const resposta = await cliente.models.generateContent({
         model: motor.modelo,
@@ -194,6 +213,40 @@ export function motorGemini(
     },
   };
   return motor;
+}
+
+// --- Voz natural (Gemini TTS) ---
+export const VOZES_NATURAIS = ["Aoede", "Kore", "Leda", "Zephyr", "Charon", "Puck", "Orus", "Fenrir"];
+
+// Procura um modelo de voz (TTS) disponível na chave, preferindo o Flash.
+export async function escolherModeloVoz(cliente) {
+  const nomes = [];
+  for await (const m of await cliente.models.list()) {
+    const nome = m.name?.replace(/^models\//, "");
+    if (nome && /tts/.test(nome)) nomes.push(nome);
+  }
+  const versao = (n) => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  nomes.sort((a, b) => (/flash/.test(b) - /flash/.test(a)) || versao(b) - versao(a));
+  return nomes[0] || null;
+}
+
+// Junta o cabeçalho WAV ao áudio PCM de 16 bits que o Gemini devolve.
+export function pcmParaWav(pcm, taxa = 24000) {
+  const cab = Buffer.alloc(44);
+  cab.write("RIFF", 0);
+  cab.writeUInt32LE(36 + pcm.length, 4);
+  cab.write("WAVE", 8);
+  cab.write("fmt ", 12);
+  cab.writeUInt32LE(16, 16);
+  cab.writeUInt16LE(1, 20); // PCM
+  cab.writeUInt16LE(1, 22); // mono
+  cab.writeUInt32LE(taxa, 24);
+  cab.writeUInt32LE(taxa * 2, 28);
+  cab.writeUInt16LE(2, 32);
+  cab.writeUInt16LE(16, 34);
+  cab.write("data", 36);
+  cab.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([cab, pcm]);
 }
 
 // Traduz erros das APIs numa explicação curta para o painel (sem segredos).
@@ -349,6 +402,8 @@ export function criarIA(motor = motorPorOmissao()) {
       return motor.modelo;
     },
     explicarErro: (erro) => explicarErro(erro, motor),
+    // Voz natural: só existe no Gemini; no Claude o telemóvel usa a voz dele.
+    falar: motor.falar ? (texto, voz) => motor.falar(texto, voz) : null,
     diagnostico: () => ({
       ia: motor.nome,
       modelo: motor.modelo,

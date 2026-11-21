@@ -10,9 +10,13 @@ Assistente pessoal com inteligência artificial (Gemini grátis ou Claude):
   tempo da tua zona (Open-Meteo, grátis), as próximas tarefas, conversa por
   voz contínua e um **⚡ resumo do dia** falado. O nome do assistente
   (por omissão "Íris") muda-se nas Definições.
+- **🗣️ Voz natural.** A Íris fala com uma voz gerada pela IA da Google
+  (várias vozes à escolha, femininas e masculinas). Se a voz natural falhar ou
+  passar o limite grátis, usa a melhor voz do telemóvel.
 - **✅ Tarefas e lembretes.** Dizes "lembra-me amanhã às 9 de pagar a luz" e
-  a tarefa é criada. O botão 📅 põe-na no calendário do telemóvel, com alerta.
-  As tarefas e a conversa ficam guardadas no próprio telemóvel.
+  a tarefa é criada. Com **📅 Ligar ao calendário** (uma vez só), o telemóvel
+  subscreve o calendário da Íris e as tarefas com data aparecem lá sozinhas,
+  com alerta.
 - **📞 Atende chamadas quando não podes.** Quem te liga e não é atendido é
   reencaminhado para a IA, que conversa por voz em português de Portugal,
   percebe quem é e o que quer, e anota o recado. No fim recebes um **SMS com o

@@ -68,6 +68,13 @@ export function criarArmazem(pasta = process.env.DATA_DIR || "data") {
       const limite = Date.now() - this.lerConfig().diasRetencao * 86_400_000;
       return ler(ficheiroChamadas, []).filter((c) => Date.parse(c.inicio) >= limite);
     },
+    // Cópia das tarefas do telemóvel, para o calendário subscrito.
+    lerTarefas() {
+      return ler(path.join(pasta, "tarefas.json"), []);
+    },
+    guardarTarefas(lista) {
+      escrever(path.join(pasta, "tarefas.json"), lista);
+    },
     guardarChamada(chamada) {
       const todas = this._recentes().filter((c) => c.id !== chamada.id);
       todas.unshift(chamada);

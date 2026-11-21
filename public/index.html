@@ -139,6 +139,16 @@
         <input type="file" id="ficheiroChat" accept="image/*" class="oculto">
         <div class="linha" style="margin-top:10px; justify-content:space-between">
           <label class="interruptor" style="margin:0; font-size:14px"><input type="checkbox" id="lerVoz"> 🔊 Ler respostas</label>
+          <select id="escolhaVoz" style="width:auto; padding:8px" title="Voz">
+            <option value="Aoede">Voz natural: Aoede (feminina, suave)</option>
+            <option value="Kore">Voz natural: Kore (feminina, firme)</option>
+            <option value="Leda">Voz natural: Leda (feminina, jovem)</option>
+            <option value="Zephyr">Voz natural: Zephyr (feminina, alegre)</option>
+            <option value="Charon">Voz natural: Charon (masculina, grave)</option>
+            <option value="Puck">Voz natural: Puck (masculina, animada)</option>
+            <option value="Orus">Voz natural: Orus (masculina, firme)</option>
+            <option value="telemovel">Voz do telemóvel (instantânea)</option>
+          </select>
           <button id="novaConversa">🧹 Nova conversa</button>
         </div>
         <button id="abrirHud" class="prim" style="width:100%; margin-top:12px">🛰️ Modo HUD (ecrã inteiro, por voz)</button>
@@ -156,6 +166,12 @@
         <p></p>
         <button id="juntarTarefa" class="prim">➕ Adicionar</button>
         <p class="mut">Dica: no separador Assistente basta dizer "lembra-me de…". Usa 📅 para pôr a tarefa no calendário do telemóvel e receber o alerta.</p>
+      </div>
+      <div class="card">
+        <b>📲 Tarefas no calendário do telemóvel</b>
+        <p class="mut">Liga uma vez e todas as tarefas com data passam a aparecer sozinhas no calendário do telemóvel, com alerta à hora certa.</p>
+        <button id="ligarCalendario" class="prim">📅 Ligar ao calendário</button>
+        <p id="infoCalendario" class="mut"></p>
       </div>
       <div class="card" id="listaTarefas"></div>
     </section>
@@ -278,7 +294,7 @@ function mostrar() {
   $("#login").classList.toggle("oculto", !!token);
   $("#app").classList.toggle("oculto", !token);
   $("#sair").classList.toggle("oculto", !token);
-  if (token) { carregarConfig(); }
+  if (token) { carregarConfig(); sincronizarTarefas(); }
 }
 function sair() { token = null; localStorage.removeItem("token"); mostrar(); }
 $("#sair").onclick = sair;
@@ -368,7 +384,16 @@ const imagemChat = seletorImagem("#anexarChat", "#ficheiroChat", "#previaChat", 
 
 // --- Assistente (chat por texto ou voz) ---
 const guardado = (k, padrao) => { try { return JSON.parse(localStorage.getItem(k)) ?? padrao; } catch { return padrao; } };
-const guardar = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+let temporizadorSync = null;
+const guardar = (k, v) => {
+  localStorage.setItem(k, JSON.stringify(v));
+  if (k === "tarefas") { clearTimeout(temporizadorSync); temporizadorSync = setTimeout(sincronizarTarefas, 800); }
+};
+// Envia as tarefas ao servidor, para o calendário subscrito no telemóvel.
+async function sincronizarTarefas() {
+  if (!token) return;
+  try { await api("/api/tarefas", { method: "PUT", body: JSON.stringify({ tarefas: guardado("tarefas", []) }) }); } catch {}
+}
 let conversa = guardado("conversa", []);
 $("#lerVoz").checked = guardado("lerVoz", false);
 $("#lerVoz").onchange = () => guardar("lerVoz", $("#lerVoz").checked);
@@ -382,19 +407,67 @@ function mostrarConversa() {
   }
   chat.scrollTop = chat.scrollHeight;
 }
-// Lê o texto em voz alta. Devolve uma promessa que acaba quando a voz termina.
-function falar(texto, sempre = false) {
+// --- Voz ---
+// Voz natural (gerada pela IA no servidor) ou, se falhar, a melhor voz do telemóvel.
+$("#escolhaVoz").value = guardado("voz", "Aoede");
+$("#escolhaVoz").onchange = () => { guardar("voz", $("#escolhaVoz").value); falar("Olá! É assim que eu falo.", true); };
+const leitor = new Audio();
+leitor.setAttribute("playsinline", "");
+// O iPhone só deixa tocar som depois de um toque: "destranca" o leitor no 1.º toque.
+const SILENCIO = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=";
+document.addEventListener("pointerdown", function destrancar() {
+  leitor.src = SILENCIO; leitor.play().catch(() => {});
+  document.removeEventListener("pointerdown", destrancar);
+}, { once: true });
+
+function melhorVozLocal() {
+  const vozes = speechSynthesis.getVoices();
+  const boas = /premium|enhanced|melhorad|neural|natural|online/i;
+  return vozes.find((v) => v.lang === "pt-PT" && boas.test(v.name)) || vozes.find((v) => v.lang === "pt-PT")
+    || vozes.find((v) => v.lang.startsWith("pt") && boas.test(v.name)) || vozes.find((v) => v.lang.startsWith("pt"));
+}
+function falarLocal(texto) {
   return new Promise((ok) => {
-    if ((!sempre && !$("#lerVoz").checked) || !("speechSynthesis" in window)) return ok();
+    if (!("speechSynthesis" in window)) return ok();
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(texto.replace(/[*#_`]/g, ""));
-    u.lang = "pt-PT";
-    const vozes = speechSynthesis.getVoices();
-    const voz = vozes.find((v) => v.lang === "pt-PT") || vozes.find((v) => v.lang.startsWith("pt"));
+    const u = new SpeechSynthesisUtterance(texto);
+    u.lang = "pt-PT"; u.rate = 1.02;
+    const voz = melhorVozLocal();
     if (voz) u.voice = voz;
     u.onend = u.onerror = () => ok();
     speechSynthesis.speak(u);
   });
+}
+function pararVoz() {
+  leitor.pause();
+  if ("speechSynthesis" in window) speechSynthesis.cancel();
+}
+// Lê o texto em voz alta. Devolve uma promessa que acaba quando a voz termina.
+async function falar(texto, sempre = false) {
+  if (!sempre && !$("#lerVoz").checked) return;
+  texto = texto.replace(/[*#_`]/g, "").trim();
+  if (!texto) return;
+  pararVoz();
+  const voz = $("#escolhaVoz").value;
+  if (voz !== "telemovel") {
+    try {
+      const r = await fetch("/api/voz", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+        body: JSON.stringify({ texto, voz }),
+      });
+      if (!r.ok) throw new Error("sem voz natural");
+      const url = URL.createObjectURL(await r.blob());
+      leitor.src = url;
+      await new Promise((ok, falha) => {
+        leitor.onended = ok; leitor.onerror = falha;
+        leitor.play().catch(falha);
+      });
+      URL.revokeObjectURL(url);
+      return;
+    } catch { /* usa a voz do telemóvel */ }
+  }
+  await falarLocal(texto);
 }
 
 // Envia uma pergunta ao assistente, guarda a conversa e cria as tarefas.
@@ -513,6 +586,19 @@ function mostrarTarefas() {
       ...botoes);
   }));
 }
+$("#ligarCalendario").onclick = async () => {
+  try {
+    await sincronizarTarefas();
+    const { url } = await api("/api/calendario-link");
+    const webcal = url.replace(/^https?:/, "webcal:");
+    $("#infoCalendario").replaceChildren(
+      "Se nada abrir, copia este link e adiciona-o no telemóvel como calendário subscrito: ",
+      el("a", { href: webcal, textContent: "abrir", style: "color:var(--ac)" }), " · ",
+      Object.assign(el("button", { textContent: "📋 Copiar link" }), { onclick: (e) => { navigator.clipboard.writeText(url); e.target.textContent = "✅ Copiado"; } }),
+    );
+    location.href = webcal;
+  } catch (err) { $("#infoCalendario").textContent = err.message; }
+};
 $("#juntarTarefa").onclick = () => {
   const v = $("#quandoTarefa").value;
   juntarTarefa($("#novaTarefa").value.trim(), v ? new Date(v).toISOString() : "", "");
@@ -688,7 +774,7 @@ async function hudPerguntar(mostrado, enviado = null) {
 function hudOuvir() {
   if (!Reconhecimento) { $("#hudResposta").textContent = "Este browser não tem reconhecimento de voz. Usa o Safari ou o Chrome."; return; }
   if (hud.rec) { hud.rec.stop(); return; }
-  speechSynthesis.cancel();
+  pararVoz();
   const rec = (hud.rec = new Reconhecimento());
   rec.lang = "pt-PT"; rec.interimResults = true;
   let dito = "";
@@ -703,7 +789,7 @@ function hudOuvir() {
   hudEstado("ouvir", "A OUVIR");
   try { rec.start(); } catch { hud.rec = null; hudEstado("repouso", "EM ESPERA"); }
 }
-$("#nucleo").onclick = () => { if (!hud.ocupado) hudOuvir(); else speechSynthesis.cancel(); };
+$("#nucleo").onclick = () => { if (!hud.ocupado) hudOuvir(); else pararVoz(); };
 $("#hudContinuo").classList.toggle("lig", hud.continuo);
 $("#hudContinuo").onclick = () => {
   hud.continuo = !hud.continuo; guardar("hudContinuo", hud.continuo);
@@ -732,7 +818,7 @@ function abrirHud() {
 }
 function fecharHud() {
   if (hud.rec) hud.rec.abort();
-  speechSynthesis.cancel();
+  pararVoz();
   clearInterval(hud.relogio);
   $("#hud").classList.add("oculto");
   mostrarConversa();
