@@ -268,3 +268,29 @@ test("erros da IA são explicados em português, sem segredos", () => {
   assert.match(explicarErro(Object.assign(new Error("x"), { name: "TimeoutError" }), g), /demorou/);
   assert.match(explicarErro(comStatus(401, "invalid x-api-key"), { nome: "claude" }), /ANTHROPIC_API_KEY/);
 });
+
+test("Gemini: se o modelo não existir, escolhe sozinho um Flash disponível", async () => {
+  const usados = [];
+  const clienteFalso = {
+    models: {
+      async generateContent(p) {
+        usados.push(p.model);
+        if (p.model === "gemini-flash-latest") throw Object.assign(new Error("models/gemini-flash-latest is not found"), { status: 404 });
+        return { text: '{"sugestoes":["a","b","c"],"nota":""}' };
+      },
+      async list() {
+        return (async function* () {
+          yield { name: "models/gemini-2.0-flash", supportedActions: ["generateContent"] };
+          yield { name: "models/gemini-2.5-flash-lite", supportedActions: ["generateContent"] };
+          yield { name: "models/gemini-2.5-flash", supportedActions: ["generateContent"] };
+          yield { name: "models/text-embedding-004", supportedActions: ["embedContent"] };
+        })();
+      },
+    },
+  };
+  const ia = criarIA(motorGemini(clienteFalso, "gemini-flash-latest"));
+  const r = await ia.sugerirResposta({ nomeDono: "Ana", instrucoes: "x", estiloMensagens: "x" }, { mensagem: "Olá" });
+  assert.equal(r.sugestoes.length, 3);
+  assert.deepEqual(usados, ["gemini-flash-latest", "gemini-2.5-flash"]);
+  assert.equal(ia.modelo, "gemini-2.5-flash");
+});

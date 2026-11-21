@@ -68,18 +68,51 @@ function schemaGemini(schema) {
   return copia;
 }
 
+const ehNaoEncontrado = (erro) => erro?.status === 404 || /not found/i.test(String(erro?.message));
+
+// Procura, na lista de modelos da chave, o Gemini Flash estável mais recente.
+export async function escolherModeloGemini(cliente) {
+  const nomes = [];
+  for await (const m of await cliente.models.list()) {
+    if (m.supportedActions && !m.supportedActions.includes("generateContent")) continue;
+    if (m.name) nomes.push(m.name.replace(/^models\//, ""));
+  }
+  const versao = (n) => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
+  const porVersao = (a, b) => versao(b) - versao(a);
+  const estaveis = nomes.filter((n) => /^gemini-\d+(\.\d+)?-flash$/.test(n)).sort(porVersao);
+  const outros = nomes
+    .filter((n) => /^gemini-.*flash/.test(n) && !/lite|tts|image|live|audio|embedding|thinking-exp/.test(n))
+    .sort(porVersao);
+  return estaveis[0] || outros[0] || null;
+}
+
 // Gemini (Google). Plano grátis com limite de pedidos por dia.
-// "gemini-flash-latest" aponta sempre para o Flash mais recente.
+// "gemini-flash-latest" aponta para o Flash mais recente; se a chave não o
+// tiver, a app escolhe sozinha outro Flash disponível (uma vez).
 export function motorGemini(
   cliente = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }),
   modelo = process.env.GEMINI_MODEL || "gemini-flash-latest",
 ) {
-  return {
+  let procurou = false;
+  const motor = {
     nome: "gemini",
     modelo,
-    async gerarJSON({ system, messages, schema, timeout, contador }) {
+    async gerarJSON(pedido) {
+      try {
+        return await this._gerar(pedido);
+      } catch (erro) {
+        if (!ehNaoEncontrado(erro) || procurou) throw erro;
+        procurou = true;
+        const alternativa = await escolherModeloGemini(cliente).catch(() => null);
+        if (!alternativa || alternativa === motor.modelo) throw erro;
+        console.log(`Modelo Gemini "${motor.modelo}" não disponível; a usar "${alternativa}".`);
+        motor.modelo = alternativa;
+        return this._gerar(pedido);
+      }
+    },
+    async _gerar({ system, messages, schema, timeout, contador }) {
       const resposta = await cliente.models.generateContent({
-        model: modelo,
+        model: motor.modelo,
         contents: messages.map((m) => ({
           role: m.role === "assistant" ? "model" : "user",
           parts: [{ text: m.content }],
@@ -103,6 +136,7 @@ export function motorGemini(
       return dados;
     },
   };
+  return motor;
 }
 
 // Traduz erros das APIs numa explicação curta para o painel (sem segredos).
@@ -230,7 +264,9 @@ function historicoParaMensagens(turnos) {
 
 export function criarIA(motor = motorPorOmissao()) {
   return {
-    modelo: motor.modelo,
+    get modelo() {
+      return motor.modelo;
+    },
     explicarErro: (erro) => explicarErro(erro, motor),
     diagnostico: () => ({
       ia: motor.nome,
