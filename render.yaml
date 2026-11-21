@@ -16,6 +16,12 @@ services:
     envVars:
       # - key: DATA_DIR
       #   value: /var/data
+      # IA a usar: "gemini" (grátis, chave em aistudio.google.com) ou
+      # "claude" (pago, chave em console.anthropic.com).
+      - key: IA
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: PAINEL_SENHA

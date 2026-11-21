@@ -1,46 +1,123 @@
 // Tudo o que fala com o Claude: conversa ao telefone, resumo da chamada e
 // sugestões de resposta para mensagens.
 import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 
-const MODELO = process.env.CLAUDE_MODEL || "claude-opus-5-5";
+// Qual IA usar: "gemini" (plano grátis da Google) ou "claude" (Anthropic, pago).
+// Sem IA definida: usa Gemini se só houver GEMINI_API_KEY, senão Claude.
+export function qualIA(env = process.env) {
+  const escolha = (env.IA || "").toLowerCase();
+  if (escolha === "gemini" || escolha === "claude") return escolha;
+  return env.GEMINI_API_KEY && !env.ANTHROPIC_API_KEY ? "gemini" : "claude";
+}
 
-// Pede ao Claude uma resposta em JSON que siga `schema`.
+const somarTokens = (contador, entrada, saida) => {
+  if (!contador) return;
+  contador.entrada = (contador.entrada || 0) + (entrada || 0);
+  contador.saida = (contador.saida || 0) + (saida || 0);
+};
+
+// Cada "motor" recebe o mesmo pedido e devolve o JSON já lido:
+//   gerarJSON({ system, messages, schema, effort, timeout, contador })
+// messages: [{ role: "user" | "assistant", content: "texto" }]
+
+// Claude (Anthropic).
 // - effort "low" nas chamadas: ao telefone a rapidez importa mais.
 // - fallbacks "default": se o modelo recusar um pedido por engano, a API
 //   tenta outro modelo recomendado em vez de falhar a chamada.
-// - contador (opcional): acumula os tokens gastos, para mostrar o custo no painel.
-async function pedirJSON(cliente, { system, messages, schema, effort, timeout, contador }) {
-  const resposta = await cliente.beta.messages.create(
-    {
-      model: MODELO,
-      max_tokens: 4000,
-      betas: ["server-side-fallback-2026-07-01"],
-      fallbacks: "default",
-      output_config: { effort, format: { type: "json_schema", schema } },
-      system,
-      messages,
+export function motorClaude(cliente = new Anthropic(), modelo = process.env.CLAUDE_MODEL || "claude-opus-5-5") {
+  return {
+    nome: "claude",
+    modelo,
+    async gerarJSON({ system, messages, schema, effort, timeout, contador }) {
+      const resposta = await cliente.beta.messages.create(
+        {
+          model: modelo,
+          max_tokens: 4000,
+          betas: ["server-side-fallback-2026-07-01"],
+          fallbacks: "default",
+          output_config: { effort, format: { type: "json_schema", schema } },
+          system,
+          messages,
+        },
+        { timeout, maxRetries: 1 },
+      );
+      const u = resposta.usage || {};
+      somarTokens(
+        contador,
+        (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0),
+        u.output_tokens,
+      );
+      if (resposta.stop_reason === "refusal") throw new Error("O modelo recusou o pedido");
+      if (resposta.stop_reason === "max_tokens") throw new Error("Resposta cortada (max_tokens)");
+      const texto = resposta.content
+        .filter((b) => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      return JSON.parse(texto);
     },
-    { timeout, maxRetries: 1 },
-  );
-  if (contador && resposta.usage) {
-    const u = resposta.usage;
-    contador.entrada = (contador.entrada || 0) + (u.input_tokens || 0) +
-      (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
-    contador.saida = (contador.saida || 0) + (u.output_tokens || 0);
-  }
-  if (resposta.stop_reason === "refusal") throw new Error("O modelo recusou o pedido");
-  if (resposta.stop_reason === "max_tokens") throw new Error("Resposta cortada (max_tokens)");
-  const texto = resposta.content
-    .filter((b) => b.type === "text")
-    .map((b) => b.text)
-    .join("");
-  return JSON.parse(texto);
+  };
+}
+
+// O Gemini não aceita "additionalProperties" em todos os modelos: tira-o.
+function schemaGemini(schema) {
+  if (Array.isArray(schema)) return schema.map(schemaGemini);
+  if (!schema || typeof schema !== "object") return schema;
+  const copia = {};
+  for (const [k, v] of Object.entries(schema)) if (k !== "additionalProperties") copia[k] = schemaGemini(v);
+  return copia;
+}
+
+// Gemini (Google). Plano grátis com limite de pedidos por dia.
+// "gemini-flash-latest" aponta sempre para o Flash mais recente.
+export function motorGemini(
+  cliente = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }),
+  modelo = process.env.GEMINI_MODEL || "gemini-flash-latest",
+) {
+  return {
+    nome: "gemini",
+    modelo,
+    async gerarJSON({ system, messages, schema, timeout, contador }) {
+      const resposta = await cliente.models.generateContent({
+        model: modelo,
+        contents: messages.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }],
+        })),
+        config: {
+          systemInstruction: system,
+          responseMimeType: "application/json",
+          responseJsonSchema: schemaGemini(schema),
+          maxOutputTokens: 4000,
+          abortSignal: AbortSignal.timeout(timeout),
+        },
+      });
+      const u = resposta.usageMetadata || {};
+      somarTokens(contador, u.promptTokenCount, (u.candidatesTokenCount || 0) + (u.thoughtsTokenCount || 0));
+      const texto = resposta.text;
+      if (!texto) throw new Error("O Gemini não devolveu resposta (bloqueada ou vazia)");
+      const dados = JSON.parse(texto);
+      for (const campo of schema.required || []) {
+        if (!(campo in dados)) throw new Error(`Resposta do Gemini sem o campo "${campo}"`);
+      }
+      return dados;
+    },
+  };
+}
+
+export function motorPorOmissao() {
+  return qualIA() === "gemini" ? motorGemini() : motorClaude();
 }
 
 // Preço por milhão de tokens (USD), para a estimativa de custo no painel.
-const PRECOS = { "claude-opus-5-5": { entrada: 4, saida: 20 } };
+// Gemini no plano grátis: 0.
+const PRECOS = {
+  "claude-opus-5-5": { entrada: 4, saida: 20 },
+  "claude-haiku-5-5": { entrada: 0.1, saida: 0.5 },
+};
 
-export function custoIA(tokens, modelo = MODELO) {
+export function custoIA(tokens, modelo) {
+  if (modelo?.startsWith("gemini")) return tokens ? 0 : null;
   const p = PRECOS[modelo];
   if (!p || !tokens) return null;
   return ((tokens.entrada || 0) * p.entrada + (tokens.saida || 0) * p.saida) / 1e6;
@@ -131,15 +208,16 @@ function historicoParaMensagens(turnos) {
     .map((t) => ({ role: t.quem === "pessoa" ? "user" : "assistant", content: t.texto }));
 }
 
-export function criarIA(cliente = new Anthropic()) {
+export function criarIA(motor = motorPorOmissao()) {
   return {
+    modelo: motor.modelo,
     // Próxima fala da IA durante uma chamada. Responde depressa (o Twilio
     // espera no máximo 15 s pelo webhook).
     async turnoChamada(config, chamada) {
       const messages = historicoParaMensagens(chamada.turnos);
       // Remover a saudação inicial se ficou como primeiro turno "ia".
       while (messages.length && messages[0].role === "assistant") messages.shift();
-      return pedirJSON(cliente, {
+      return motor.gerarJSON({
         system: systemChamada(config, chamada),
         messages,
         schema: SCHEMA_TURNO,
@@ -153,7 +231,7 @@ export function criarIA(cliente = new Anthropic()) {
       const transcricao = chamada.turnos
         .map((t) => `${t.quem === "ia" ? "Assistente" : "Pessoa"}: ${t.texto}`)
         .join("\n");
-      return pedirJSON(cliente, {
+      return motor.gerarJSON({
         system: `Resumes chamadas atendidas pelo assistente de ${dono(config)}. Português de Portugal. Sê factual: não inventes nada que não esteja na transcrição.
 Nunca copies para o resumo números de cartão, IBAN, códigos, palavras-passe ou moradas completas: escreve só "deixou dados sensíveis".`,
         messages: [
@@ -172,7 +250,7 @@ Nunca copies para o resumo números de cartão, IBAN, códigos, palavras-passe o
     // Para contas pessoais (Instagram, Facebook, WhatsApp...): a pessoa cola
     // ou partilha a mensagem recebida e recebe sugestões para copiar.
     async sugerirResposta(config, { mensagem, plataforma, contexto }) {
-      return pedirJSON(cliente, {
+      return motor.gerarJSON({
         system: `Ajudas ${dono(config)} a responder às mensagens que recebe nas redes sociais. Escreves na primeira pessoa, em nome dessa pessoa.
 Estilo: ${config.estiloMensagens}
 Informação que podes usar:

@@ -1,6 +1,6 @@
 # 🤖 Assistente IA
 
-Assistente pessoal com inteligência artificial (Claude):
+Assistente pessoal com inteligência artificial (Gemini grátis ou Claude):
 
 - **📞 Atende chamadas quando não podes.** Quem te liga e não é atendido é
   reencaminhado para a IA, que conversa por voz em português de Portugal,
@@ -64,7 +64,8 @@ envias, com um toque.
 
 | Serviço | Para quê | Custo aproximado |
 |---|---|---|
-| [Anthropic](https://console.anthropic.com) | A IA (Claude) | alguns cêntimos por chamada |
+| [Google AI Studio](https://aistudio.google.com) | A IA (Gemini) — **opção grátis** | 0 € (limite de pedidos por dia) |
+| [Anthropic](https://console.anthropic.com) | A IA (Claude) — opção paga, mais fiável | alguns cêntimos por chamada |
 | [Twilio](https://www.twilio.com) | Número de telefone + voz + SMS | número ~1–15 €/mês + cêntimos/minuto |
 | [Render](https://render.com) (ou outro) | Servidor sempre ligado | ~7 $/mês |
 
@@ -78,6 +79,18 @@ envias, com um toque.
 > o código atual usa a voz e o reconhecimento de fala do Twilio. Mudar para
 > SIP implica tratar do áudio por conta própria (voz para texto e texto para
 > voz), por isso fica para uma fase seguinte.
+
+### Gemini (grátis) ou Claude (pago)?
+
+Escolhe com a variável `IA`:
+
+- **`IA=gemini`** (por omissão no Render): grátis, com limite diário de pedidos.
+  Uma chamada gasta cerca de 5 a 10 pedidos. Se passares o limite, a IA deixa
+  de responder até ao dia seguinte (a chamada diz que houve um problema técnico
+  e tu recebes o SMS na mesma). Confirma nos termos da Google se as conversas
+  do plano grátis podem ser usadas para treino.
+- **`IA=claude`**: pago, mais fiável a detetar burlas e a cumprir as regras de
+  segurança. Para gastar menos, junta `CLAUDE_MODEL=claude-haiku-5-5`.
 
 ### 2. Instalar o servidor
 

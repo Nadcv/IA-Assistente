@@ -191,7 +191,7 @@ export async function finalizarChamada({ ia, armazem, notificador }, chamada, du
   // Privacidade: guarda a conversa sem cartões, IBAN nem códigos.
   chamada.turnos = chamada.turnos.map((t) => ({ ...t, texto: redigir(t.texto) }));
   chamada.custo = {
-    iaUSD: custoIA(chamada.tokens),
+    iaUSD: custoIA(chamada.tokens, ia.modelo),
     minutos: chamada.duracaoSeg ? Math.ceil(chamada.duracaoSeg / 60) : null,
   };
   armazem.guardarChamada(chamada);

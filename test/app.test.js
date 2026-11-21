@@ -8,7 +8,7 @@ process.env.TWILIO_VALIDAR = "false";
 const { criarApp } = await import("../src/server.js");
 const { criarArmazem, nomeDoContacto, estaNaLista } = await import("../src/armazem.js");
 const { redigir } = await import("../src/privacidade.js");
-const { criarIA } = await import("../src/ia.js");
+const { criarIA, motorClaude, motorGemini, qualIA, custoIA } = await import("../src/ia.js");
 
 let servidor, base, pasta, armazemTeste;
 const sms = [];
@@ -16,6 +16,7 @@ const falas = [];
 
 // IA falsa: termina a conversa à segunda fala da pessoa; reage a palavras-chave.
 const iaFalsa = {
+  modelo: "claude-opus-5-5",
   async turnoChamada(config, chamada) {
     const ultima = chamada.turnos.at(-1).texto;
     chamada.tokens.entrada = (chamada.tokens.entrada || 0) + 1000;
@@ -206,7 +207,7 @@ test("ia.js envia pedido correto ao Claude e lê o JSON", async () => {
       return { stop_reason: "end_turn", content: [{ type: "text", text: '{"fala":"Olá","terminar":false}' }] };
     } } },
   };
-  const ia = criarIA(clienteFalso);
+  const ia = criarIA(motorClaude(clienteFalso));
   const chamada = { de: "+351", saudacao: "Olá!", turnos: [{ quem: "ia", texto: "Olá!" }, { quem: "pessoa", texto: "Bom dia" }] };
   const r = await ia.turnoChamada({ nomeDono: "Ana", instrucoes: "x" }, chamada);
   assert.deepEqual(r, { fala: "Olá", terminar: false });
@@ -217,4 +218,43 @@ test("ia.js envia pedido correto ao Claude e lê o JSON", async () => {
 
   clienteFalso.beta.messages.create = async () => ({ stop_reason: "refusal", content: [] });
   await assert.rejects(ia.turnoChamada({ nomeDono: "Ana", instrucoes: "x" }, chamada), /recusou/);
+});
+
+test("ia.js com Gemini: converte o pedido e valida o JSON", async () => {
+  let pedido;
+  const clienteFalso = {
+    models: {
+      async generateContent(p) {
+        pedido = p;
+        return { text: '{"fala":"Olá","terminar":false,"entendeu":true,"risco":"baixo"}', usageMetadata: { promptTokenCount: 500, candidatesTokenCount: 20 } };
+      },
+    },
+  };
+  const ia = criarIA(motorGemini(clienteFalso, "gemini-flash-latest"));
+  const chamada = {
+    de: "+351", saudacao: "Olá!", tokens: {},
+    turnos: [{ quem: "ia", texto: "Olá!" }, { quem: "pessoa", texto: "Bom dia" }, { quem: "ia", texto: "Diga" }, { quem: "pessoa", texto: "Sou o Rui" }],
+  };
+  const r = await ia.turnoChamada({ nomeDono: "Ana", instrucoes: "x" }, chamada);
+  assert.equal(r.fala, "Olá");
+  assert.equal(pedido.model, "gemini-flash-latest");
+  assert.deepEqual(pedido.contents.map((c) => c.role), ["user", "model", "user"]);
+  assert.equal(pedido.config.responseMimeType, "application/json");
+  assert.equal(JSON.stringify(pedido.config.responseJsonSchema).includes("additionalProperties"), false);
+  assert.match(pedido.config.systemInstruction, /assistente telefónico de Ana/);
+  assert.deepEqual(chamada.tokens, { entrada: 500, saida: 20 });
+  assert.equal(custoIA(chamada.tokens, "gemini-flash-latest"), 0);
+
+  clienteFalso.models.generateContent = async () => ({ text: '{"fala":"x"}' });
+  await assert.rejects(ia.turnoChamada({ nomeDono: "Ana", instrucoes: "x" }, chamada), /sem o campo "terminar"/);
+  clienteFalso.models.generateContent = async () => ({ text: undefined });
+  await assert.rejects(ia.turnoChamada({ nomeDono: "Ana", instrucoes: "x" }, chamada), /não devolveu/);
+});
+
+test("escolha da IA pelas variáveis de ambiente", () => {
+  assert.equal(qualIA({ IA: "gemini" }), "gemini");
+  assert.equal(qualIA({ IA: "Claude", GEMINI_API_KEY: "g" }), "claude");
+  assert.equal(qualIA({ GEMINI_API_KEY: "g" }), "gemini");
+  assert.equal(qualIA({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" }), "claude");
+  assert.equal(qualIA({}), "claude");
 });
