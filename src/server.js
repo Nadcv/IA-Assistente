@@ -108,8 +108,11 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
       return res.status(400).json({ erro: "Escreve ou diz alguma coisa." });
     }
     try {
+      const inicio = Date.now();
       const r = await ia.conversar(armazem.lerConfig(), { historico, imagem });
-      res.json(r);
+      const tempoMs = Date.now() - inicio;
+      console.log(`Assistente respondeu em ${tempoMs} ms (${ia.modelo || "?"})`);
+      res.json({ ...r, tempoMs, modelo: ia.modelo });
     } catch (erro) {
       console.error("Erro no assistente:", erro.status || "", erro.message);
       res.status(502).json({ erro: ia.explicarErro ? ia.explicarErro(erro) : "A IA não respondeu. Tenta outra vez." });

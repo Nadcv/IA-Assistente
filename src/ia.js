@@ -91,6 +91,13 @@ function schemaGemini(schema) {
   return copia;
 }
 
+// Quanto o Gemini "pensa" antes de responder. Pensar muito = respostas lentas.
+// Gemini 1.x/2.x usam thinkingBudget (0 = não pensa); 3.x em diante usam thinkingLevel.
+export function pensamentoGemini(modelo, effort) {
+  if (/^gemini-[12]\./.test(modelo)) return { thinkingBudget: effort === "low" ? 0 : 512 };
+  return { thinkingLevel: effort === "low" ? "MINIMAL" : "LOW" };
+}
+
 const ehNaoEncontrado = (erro) => erro?.status === 404 || /not found/i.test(String(erro?.message));
 
 // Procura, na lista de modelos da chave, o Gemini Flash estável mais recente.
@@ -120,6 +127,7 @@ export function motorGemini(
   // Modelos a evitar: os que não existem (para sempre) e os ocupados (10 min).
   const evitar = new Map(); // nome -> até quando (ms)
   const aEvitar = () => [...evitar].filter(([, ate]) => ate > Date.now()).map(([n]) => n);
+  let semPensamento = false; // se o modelo recusar a configuração de pensamento
   const ehOcupado = (erro) => erro?.status >= 500 || /overloaded|unavailable|high demand/i.test(String(erro?.message));
   const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const motor = {
@@ -138,6 +146,11 @@ export function motorGemini(
           return await this._gerar({ ...pedido, timeout: resta });
         } catch (erro) {
           ultimo = erro;
+          if (!semPensamento && erro?.status === 400 && /think/i.test(String(erro?.message))) {
+            console.log(`Gemini "${motor.modelo}" não aceita a configuração de pensamento; a tirar.`);
+            semPensamento = true;
+            continue;
+          }
           const ocupado = ehOcupado(erro);
           if (!ocupado && !ehNaoEncontrado(erro)) throw erro;
           if (ocupado && !repetiu) {
@@ -156,7 +169,7 @@ export function motorGemini(
       }
       throw ultimo || Object.assign(new Error("timed out"), { name: "TimeoutError" });
     },
-    async _gerar({ system, messages, schema, timeout, contador }) {
+    async _gerar({ system, messages, schema, effort, timeout, contador }) {
       const resposta = await cliente.models.generateContent({
         model: motor.modelo,
         contents: paraGemini(messages),
@@ -165,6 +178,7 @@ export function motorGemini(
           responseMimeType: "application/json",
           responseJsonSchema: schemaGemini(schema),
           maxOutputTokens: 4000,
+          ...(semPensamento ? {} : { thinkingConfig: pensamentoGemini(motor.modelo, effort) }),
           abortSignal: AbortSignal.timeout(timeout),
         },
       });
@@ -432,7 +446,7 @@ ${config.instrucoes}
 """`,
         messages,
         schema: SCHEMA_CONVERSA,
-        effort: "medium",
+        effort: "low",
         timeout: 60_000,
       });
     },

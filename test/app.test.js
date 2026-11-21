@@ -8,7 +8,7 @@ process.env.TWILIO_VALIDAR = "false";
 const { criarApp } = await import("../src/server.js");
 const { criarArmazem, nomeDoContacto, estaNaLista } = await import("../src/armazem.js");
 const { redigir } = await import("../src/privacidade.js");
-const { criarIA, motorClaude, motorGemini, qualIA, custoIA, explicarErro } = await import("../src/ia.js");
+const { criarIA, motorClaude, motorGemini, qualIA, custoIA, explicarErro, pensamentoGemini } = await import("../src/ia.js");
 
 let servidor, base, pasta, armazemTeste;
 const sms = [];
@@ -409,4 +409,21 @@ test("imagens chegam no formato certo ao Claude e ao Gemini", async () => {
 
   await criarIA(motorGemini(gemini, "gemini-2.5-flash")).conversar(config, pedido);
   assert.deepEqual(pedidoGemini.contents[0].parts, [{ inlineData: { mimeType: "image/png", data: PNG_1PX } }, { text: "O que é isto?" }]);
+});
+
+test("Gemini responde depressa: pouco pensamento, e tira-o se o modelo não aceitar", async () => {
+  assert.deepEqual(pensamentoGemini("gemini-2.5-flash", "low"), { thinkingBudget: 0 });
+  assert.deepEqual(pensamentoGemini("gemini-3.8-flash", "low"), { thinkingLevel: "MINIMAL" });
+  assert.deepEqual(pensamentoGemini("gemini-3.8-flash", "medium"), { thinkingLevel: "LOW" });
+
+  const configs = [];
+  const clienteFalso = { models: { async generateContent(p) {
+    configs.push(p.config.thinkingConfig);
+    if (p.config.thinkingConfig) throw Object.assign(new Error("thinking_level is not supported"), { status: 400 });
+    return { text: '{"resposta":"Olá","tarefas":[]}' };
+  } } };
+  const ia = criarIA(motorGemini(clienteFalso, "gemini-3.8-flash"));
+  const r = await ia.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "Olá" }] });
+  assert.equal(r.resposta, "Olá");
+  assert.deepEqual(configs, [{ thinkingLevel: "MINIMAL" }, undefined]);
 });

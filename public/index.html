@@ -674,6 +674,7 @@ async function hudPerguntar(mostrado, enviado = null) {
     const extra = (r.tarefas || []).map((t) => "✅ " + t.titulo).join("\n");
     hudEscrever(r.resposta + (extra ? "\n" + extra : ""));
     hudEstado("falar", "A RESPONDER");
+    if (r.tempoMs) $("#hudOuvido").textContent += `  ·  ${(r.tempoMs / 1000).toFixed(1)} s`;
     await falar(r.resposta, true);
     hudEstado("repouso", "EM ESPERA");
     hud.ocupado = false;
