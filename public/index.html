@@ -28,6 +28,7 @@
   .sug button { margin-top:8px; }
   .nota { color:var(--warn); margin-top:10px; }
   .tag { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; font-weight:600; }
+  .aviso { background:var(--err); margin-left:4px; } .cinza { background:#475569; margin-left:4px; }
   .alta { background:var(--err); } .media { background:var(--warn); color:#000; } .baixa { background:var(--ok); color:#000; }
   .transc { font-size:14px; margin-top:8px; display:none; }
   .transc.aberta { display:block; }
@@ -91,6 +92,11 @@
         <textarea id="instrucoes" rows="5"></textarea>
         <label for="contactos">Contactos conhecidos (um por linha: <code>Nome: +351912345678</code>)</label>
         <textarea id="contactos" rows="4"></textarea>
+        <label class="interruptor" style="margin-top:14px"><input type="checkbox" id="soContactos"> IA só atende contactos conhecidos</label>
+        <label for="bloqueados">Números bloqueados (spam), um por linha</label>
+        <textarea id="bloqueados" rows="3" placeholder="+351 960 000 000"></textarea>
+        <label for="diasRetencao">Apagar chamadas guardadas há mais de (dias)</label>
+        <input id="diasRetencao" type="number" min="1" max="365">
         <label for="numeroNotificacoes">O teu telemóvel, para receber o resumo por SMS</label>
         <input id="numeroNotificacoes" placeholder="+351912345678">
         <label for="estiloMensagens">Estilo das respostas às mensagens</label>
@@ -180,6 +186,23 @@ async function carregarChamadas() {
     if (!chamadas.length) { lista.replaceChildren(el("p", { className: "mut", textContent: "Ainda não há chamadas atendidas." })); return; }
     lista.replaceChildren(...chamadas.map((c) => {
       const r = c.resumo || {};
+      if (c.filtro) {
+        return el("div", { className: "card" },
+          el("div", { className: "linha" },
+            el("span", { className: "tag cinza", textContent: c.filtro === "bloqueada" ? "bloqueada" : "filtrada" }),
+            el("b", { textContent: c.de || "Número privado" }),
+            el("span", { className: "mut", textContent: new Date(c.inicio).toLocaleString("pt-PT") })));
+      }
+      const custo = c.custo && (c.custo.iaUSD != null || c.custo.minutos)
+        ? "💶 ≈ " + [c.custo.iaUSD != null ? "$" + c.custo.iaUSD.toFixed(3) + " IA" : "", c.custo.minutos ? c.custo.minutos + " min" : ""].filter(Boolean).join(" + ")
+        : "";
+      const bloquear = el("button", { textContent: "🚫 Bloquear número" });
+      bloquear.onclick = async () => {
+        if (!c.de || !confirm("Bloquear " + c.de + "?")) return;
+        const atual = await api("/api/config");
+        await api("/api/config", { method: "PUT", body: JSON.stringify({ bloqueados: (atual.bloqueados ? atual.bloqueados + "\n" : "") + c.de }) });
+        bloquear.textContent = "✅ Bloqueado"; bloquear.disabled = true;
+      };
       const transc = el("div", { className: "transc" },
         ...c.turnos.map((t) => el("p", {}, el("b", { textContent: (t.quem === "ia" ? "IA" : "Pessoa") + ": " }), t.texto)));
       const ver = el("button", { textContent: "Ver conversa" });
@@ -188,30 +211,34 @@ async function carregarChamadas() {
         el("div", { className: "linha" },
           el("span", { className: "tag " + (r.urgencia || "baixa"), textContent: r.urgencia || "—" }),
           el("b", { textContent: r.quem || c.nomeContacto || c.de || "Desconhecido" }),
+          c.possivelBurla ? el("span", { className: "tag aviso", textContent: "⚠️ burla?" }) : "",
+          c.ambigua ? el("span", { className: "tag cinza", textContent: "confusa" }) : "",
           el("span", { className: "mut", textContent: new Date(c.inicio).toLocaleString("pt-PT") })),
         el("p", { textContent: r.assunto || "(sem resumo)" }),
         r.acao ? el("p", { className: "mut", textContent: "👉 " + r.acao }) : "",
         r.contactoDeixado ? el("p", { className: "mut", textContent: "📞 " + r.contactoDeixado }) : "",
-        el("p", { className: "mut", textContent: "Número: " + (c.de || "privado") }),
-        ver, transc);
+        el("p", { className: "mut", textContent: "Número: " + (c.de || "privado") + (custo ? "  ·  " + custo : "") }),
+        el("div", { className: "linha" }, ver, c.de ? bloquear : ""), transc);
     }));
   } catch (err) { lista.replaceChildren(el("p", { className: "nota", textContent: err.message })); }
 }
 $("#atualizar").onclick = carregarChamadas;
 
 // --- Definições ---
-const campos = ["nomeDono", "instrucoes", "contactos", "numeroNotificacoes", "estiloMensagens"];
+const campos = ["nomeDono", "instrucoes", "contactos", "bloqueados", "diasRetencao", "numeroNotificacoes", "estiloMensagens"];
 async function carregarConfig() {
   try {
     const c = await api("/api/config");
     campos.forEach((k) => $("#" + k).value = c[k] || "");
     $("#ativo").checked = !!c.ativo;
+    $("#soContactos").checked = !!c.soContactos;
   } catch {}
 }
 $("#formConfig").onsubmit = async (e) => {
   e.preventDefault();
   const dados = Object.fromEntries(campos.map((k) => [k, $("#" + k).value]));
   dados.ativo = $("#ativo").checked;
+  dados.soContactos = $("#soContactos").checked;
   try { await api("/api/config", { method: "PUT", body: JSON.stringify(dados) }); $("#okConfig").textContent = "✅ Guardado"; }
   catch (err) { $("#okConfig").textContent = err.message; }
 };

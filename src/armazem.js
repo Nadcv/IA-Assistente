@@ -11,6 +11,12 @@ export const CONFIG_PADRAO = {
     "Para assuntos urgentes, anota o nome, o motivo e o número de contacto.",
   // Uma linha por contacto: "Nome: +351912345678"
   contactos: "",
+  // Números que nunca são atendidos pela IA (spam), um por linha.
+  bloqueados: "",
+  // true: a IA só atende quem está nos contactos; os outros ouvem um aviso curto.
+  soContactos: false,
+  // Apaga chamadas guardadas há mais de X dias (privacidade).
+  diasRetencao: 30,
   // Para onde enviar o resumo de cada chamada (o teu telemóvel).
   numeroNotificacoes: "",
   // Estilo das sugestões de resposta para mensagens.
@@ -44,26 +50,46 @@ export function criarArmazem(pasta = process.env.DATA_DIR || "data") {
       const atual = this.lerConfig();
       for (const k of permitidos) {
         if (k in parcial) {
-          atual[k] = k === "ativo" ? Boolean(parcial[k]) : String(parcial[k]).slice(0, 5000);
+          const padrao = CONFIG_PADRAO[k];
+          if (typeof padrao === "boolean") atual[k] = Boolean(parcial[k]);
+          else if (typeof padrao === "number") atual[k] = Math.min(365, Math.max(1, Math.round(Number(parcial[k]) || padrao)));
+          else atual[k] = String(parcial[k]).slice(0, 5000);
         }
       }
       escrever(ficheiroConfig, atual);
       return atual;
     },
     listarChamadas() {
-      return ler(ficheiroChamadas, []);
+      return this._recentes();
+    },
+    // Só as chamadas dentro do prazo de retenção.
+    _recentes() {
+      const limite = Date.now() - this.lerConfig().diasRetencao * 86_400_000;
+      return ler(ficheiroChamadas, []).filter((c) => Date.parse(c.inicio) >= limite);
     },
     guardarChamada(chamada) {
-      const todas = ler(ficheiroChamadas, []).filter((c) => c.id !== chamada.id);
+      const todas = this._recentes().filter((c) => c.id !== chamada.id);
       todas.unshift(chamada);
       escrever(ficheiroChamadas, todas.slice(0, 500));
     },
   };
 }
 
+const limparNumero = (n) => String(n || "").replace(/[^\d+]/g, "").replace(/^00/, "+");
+
+// true se o número estiver na lista (um número por linha; aceita "Nome: número").
+export function estaNaLista(listaTexto, numero) {
+  const alvo = limparNumero(numero);
+  if (alvo.length < 9) return false;
+  return String(listaTexto || "").split("\n").some((linha) => {
+    const num = limparNumero(linha.slice(linha.lastIndexOf(":") + 1));
+    return num.length >= 9 && num.slice(-9) === alvo.slice(-9);
+  });
+}
+
 // Converte o texto "Nome: +351..." numa lista e procura quem está a ligar.
 export function nomeDoContacto(contactosTexto, numero) {
-  const limpar = (n) => String(n || "").replace(/[^\d+]/g, "").replace(/^00/, "+");
+  const limpar = limparNumero;
   const alvo = limpar(numero);
   if (!alvo) return null;
   for (const linha of String(contactosTexto || "").split("\n")) {

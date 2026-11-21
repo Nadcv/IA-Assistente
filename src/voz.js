@@ -6,12 +6,16 @@
 // acaba, /voz/estado gera o resumo e manda-te um SMS.
 import express from "express";
 import twilio from "twilio";
-import { saudacao } from "./ia.js";
-import { nomeDoContacto } from "./armazem.js";
+import { saudacao, custoIA } from "./ia.js";
+import { nomeDoContacto, estaNaLista } from "./armazem.js";
+import { redigir } from "./privacidade.js";
 import { textoResumo } from "./notificar.js";
 
 const VOZ = { voice: process.env.TWILIO_VOZ || "Polly.Ines-Neural", language: "pt-PT" };
 const MAX_TURNOS = 12; // corta conversas intermináveis (custo e abusos)
+const FRASE_BURLA = "Não posso tratar desse assunto por telefone. Vou desligar. Obrigado.";
+const FRASE_NAO_PERCEBI = "Desculpe, não consegui perceber. Quer que eu peça para lhe ligarem de volta?";
+const FRASE_DESISTIR = "Vou pedir para lhe ligarem de volta assim que possível. Até logo!";
 
 export function rotasVoz({ ia, armazem, notificador }) {
   const router = express.Router();
@@ -28,6 +32,7 @@ export function rotasVoz({ ia, armazem, notificador }) {
       action: "/voz/resposta",
       method: "POST",
       actionOnEmptyResult: true,
+      bargeIn: true, // se a pessoa começar a falar, a IA cala-se e ouve
     });
     g.say(VOZ, texto);
   };
@@ -42,6 +47,25 @@ export function rotasVoz({ ia, armazem, notificador }) {
     }
     const de = req.body.From || "";
     const nomeContacto = nomeDoContacto(config.contactos, de);
+
+    // Filtro antes de atender: não gasta IA com spam nem desconhecidos.
+    const filtro = estaNaLista(config.bloqueados, de)
+      ? "bloqueada"
+      : config.soContactos && !nomeContacto
+        ? "filtrada"
+        : null;
+    if (filtro) {
+      resp.say(
+        VOZ,
+        filtro === "bloqueada"
+          ? "Este número não está disponível. Adeus."
+          : "Neste momento não é possível atender. Por favor, envie uma mensagem escrita. Obrigado.",
+      );
+      resp.hangup();
+      armazem.guardarChamada({ id: req.body.CallSid, de, inicio: new Date().toISOString(), filtro, turnos: [] });
+      return res.type("text/xml").send(resp.toString());
+    }
+
     const chamada = {
       id: req.body.CallSid,
       de,
@@ -49,6 +73,8 @@ export function rotasVoz({ ia, armazem, notificador }) {
       inicio: new Date().toISOString(),
       turnos: [],
       silencios: 0,
+      naoEntendeu: 0,
+      tokens: {},
     };
     chamada.saudacao = saudacao(config, nomeContacto);
     chamada.turnos.push({ quem: "ia", texto: chamada.saudacao });
@@ -81,7 +107,26 @@ export function rotasVoz({ ia, armazem, notificador }) {
     chamada.turnos.push({ quem: "pessoa", texto: falou });
     let fala, terminar;
     try {
-      ({ fala, terminar } = await ia.turnoChamada(armazem.lerConfig(), chamada));
+      const r = await ia.turnoChamada(armazem.lerConfig(), chamada);
+      ({ fala, terminar } = r);
+      if (r.risco === "alto") {
+        // Possível burla: frase segura fixa e desliga, diga a IA o que disser.
+        chamada.possivelBurla = true;
+        fala = FRASE_BURLA;
+        terminar = true;
+      } else if (r.entendeu === false) {
+        chamada.naoEntendeu += 1;
+        if (chamada.naoEntendeu === 2) {
+          chamada.ambigua = true;
+          fala = FRASE_NAO_PERCEBI;
+          terminar = false;
+        } else if (chamada.naoEntendeu > 2) {
+          fala = FRASE_DESISTIR;
+          terminar = true;
+        }
+      } else {
+        chamada.naoEntendeu = 0;
+      }
     } catch (erro) {
       console.error("Erro da IA na chamada:", erro.message);
       fala = "Desculpe, tive um problema técnico. Já ficou registado que ligou e vão ligar-lhe de volta. Até logo!";
@@ -134,6 +179,7 @@ export async function finalizarChamada({ ia, armazem, notificador }, chamada, du
   chamada.fim = new Date().toISOString();
   chamada.duracaoSeg = Number(duracao) || null;
   delete chamada.silencios;
+  delete chamada.naoEntendeu;
   const config = armazem.lerConfig();
   try {
     chamada.resumo = await ia.resumirChamada(config, chamada);
@@ -141,6 +187,13 @@ export async function finalizarChamada({ ia, armazem, notificador }, chamada, du
     console.error("Erro ao resumir chamada:", erro.message);
     chamada.resumo = null;
   }
+  if (chamada.resumo?.possivelBurla) chamada.possivelBurla = true;
+  // Privacidade: guarda a conversa sem cartões, IBAN nem códigos.
+  chamada.turnos = chamada.turnos.map((t) => ({ ...t, texto: redigir(t.texto) }));
+  chamada.custo = {
+    iaUSD: custoIA(chamada.tokens),
+    minutos: chamada.duracaoSeg ? Math.ceil(chamada.duracaoSeg / 60) : null,
+  };
   armazem.guardarChamada(chamada);
   try {
     await notificador.sms(config.numeroNotificacoes || process.env.NUMERO_NOTIFICACOES, textoResumo(chamada));

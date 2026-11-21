@@ -25,6 +25,29 @@ envias, com um toque.
 > Se mudares para conta Profissional (é grátis: Definições → Tipo de conta),
 > dá para acrescentar respostas 100% automáticas pela API oficial da Meta.
 
+## Triagem e proteção nas chamadas
+
+- **Interromper a IA (barge-in):** se a pessoa começar a falar, a IA cala-se e
+  ouve, como numa conversa normal.
+- **Filtro antes de atender:** números bloqueados ouvem um aviso curto e a
+  chamada desliga sem gastar IA. Há também o modo **"só contactos"**, em que a
+  IA só atende quem está na tua lista. No painel, cada chamada tem um botão
+  **Bloquear número**.
+- **Deteção de burla na chamada:** se alguém pedir códigos, dados bancários ou
+  pagamentos, ou disser que é do banco com pressa, a IA diz uma frase segura
+  fixa ("Não posso tratar desse assunto por telefone. Vou desligar.") e desliga.
+  O SMS chega com **⚠️ POSSÍVEL BURLA**.
+- **Quando não percebe:** à segunda vez que não entende, pergunta se querem que
+  te liguem de volta. À terceira despede-se, e a chamada fica marcada como
+  "confusa" no painel.
+- **SMS curto:** `🔴 Mãe | Consulta mudou para 15h | Ligar antes das 14h`,
+  seguido do número.
+- **Privacidade:** números de cartão, IBAN e códigos são apagados das conversas
+  antes de serem guardadas ou enviadas por SMS. As chamadas são apagadas
+  automaticamente ao fim de 30 dias (podes mudar no painel).
+- **Custo por chamada:** o painel mostra uma estimativa do custo da IA e os
+  minutos de cada chamada.
+
 ## Segurança
 
 - A IA ao telefone **nunca** dá dados pessoais, códigos ou palavras-passe,
@@ -49,6 +72,12 @@ envias, com um toque.
 > (documento de identificação e morada), e a aprovação pode demorar alguns
 > dias: pede o número antes de quereres testar chamadas reais. Em alternativa podes usar um número de
 > outro país, mas o reencaminhamento pode custar mais na tua operadora.
+
+> **Alternativas mais baratas ao Twilio** (operadores SIP portugueses, números
+> virtuais gratuitos, assistentes de voz que correm no teu próprio servidor):
+> o código atual usa a voz e o reconhecimento de fala do Twilio. Mudar para
+> SIP implica tratar do áudio por conta própria (voz para texto e texto para
+> voz), por isso fica para uma fase seguinte.
 
 ### 2. Instalar o servidor
 

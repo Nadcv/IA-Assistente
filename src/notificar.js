@@ -1,5 +1,6 @@
 // Envia-te um SMS com o resumo de cada chamada (via Twilio).
 import twilio from "twilio";
+import { redigir } from "./privacidade.js";
 
 export function criarNotificador() {
   const { TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_NUMERO } = process.env;
@@ -18,17 +19,19 @@ export function criarNotificador() {
   };
 }
 
+// SMS curto, fácil de ler no ecrã bloqueado: QUEM | ASSUNTO | AÇÃO
 export function textoResumo(chamada) {
   const r = chamada.resumo;
-  const icone = { alta: "🔴 URGENTE", media: "🟠", baixa: "🟢" }[r?.urgencia] || "📞";
-  if (!r) return `📞 Chamada de ${chamada.nomeContacto || chamada.de || "número privado"} (sem resumo).`;
-  return [
-    `${icone} Chamada atendida pela IA`,
-    `De: ${r.quem}${chamada.de ? ` (${chamada.de})` : ""}`,
-    `Assunto: ${r.assunto}`,
-    r.contactoDeixado ? `Contacto: ${r.contactoDeixado}` : null,
-    `Fazer: ${r.acao}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const numero = chamada.de || "número privado";
+  const linhas = [];
+  if (chamada.possivelBurla) linhas.push("⚠️ POSSÍVEL BURLA — não devolvas a chamada sem confirmar");
+  if (!r) {
+    linhas.push(`📞 ${chamada.nomeContacto || numero} | ligou | ver painel`);
+  } else {
+    const icone = { alta: "🔴", media: "🟠", baixa: "🟢" }[r.urgencia] || "📞";
+    linhas.push(`${icone} ${r.quem} | ${r.assunto} | ${r.acao}`);
+    linhas.push(`📞 ${r.contactoDeixado || numero}`);
+  }
+  if (chamada.ambigua) linhas.push("(conversa confusa — vê a transcrição)");
+  return redigir(linhas.join("\n"));
 }
