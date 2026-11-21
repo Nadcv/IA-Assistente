@@ -94,37 +94,44 @@ export function motorGemini(
   cliente = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }),
   modelo = process.env.GEMINI_MODEL || "gemini-flash-latest",
 ) {
-  const falhados = new Set(); // modelos que não existem ou estão sempre ocupados
-  const ehOcupado = (erro) => erro?.status >= 500 || /overloaded|unavailable|internal/i.test(String(erro?.message));
+  // Modelos a evitar: os que não existem (para sempre) e os ocupados (10 min).
+  const evitar = new Map(); // nome -> até quando (ms)
+  const aEvitar = () => [...evitar].filter(([, ate]) => ate > Date.now()).map(([n]) => n);
+  const ehOcupado = (erro) => erro?.status >= 500 || /overloaded|unavailable|high demand/i.test(String(erro?.message));
   const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const motor = {
     nome: "gemini",
     modelo,
+    // Tenta o modelo atual; se estiver ocupado repete uma vez, e depois vai
+    // mudando para outros Flash disponíveis até um responder (dentro do tempo).
     async gerarJSON(pedido) {
-      try {
-        return await this._gerar(pedido);
-      } catch (erro) {
-        if (!ehNaoEncontrado(erro) && !ehOcupado(erro)) throw erro;
-        let ultimo = erro;
-        // Ocupado: tenta outra vez o mesmo modelo, um segundo depois.
-        if (ehOcupado(erro)) {
-          await esperar(1000);
-          try {
-            return await this._gerar(pedido);
-          } catch (e) {
-            if (!ehOcupado(e)) throw e;
-            ultimo = e;
+      const inicio = Date.now();
+      let ultimo;
+      let repetiu = false;
+      for (let tentativa = 0; tentativa < 6; tentativa++) {
+        const resta = pedido.timeout - (Date.now() - inicio);
+        if (resta < 1500) break;
+        try {
+          return await this._gerar({ ...pedido, timeout: resta });
+        } catch (erro) {
+          ultimo = erro;
+          const ocupado = ehOcupado(erro);
+          if (!ocupado && !ehNaoEncontrado(erro)) throw erro;
+          if (ocupado && !repetiu) {
+            repetiu = true;
+            await esperar(800);
+            continue;
           }
+          console.log(`Gemini "${motor.modelo}" falhou (${erro.status || ""}); a procurar outro modelo.`);
+          evitar.set(motor.modelo, ocupado ? Date.now() + 10 * 60_000 : Infinity);
+          repetiu = false;
+          const alternativa = await escolherModeloGemini(cliente, aEvitar()).catch(() => null);
+          if (!alternativa) break;
+          console.log(`A usar o modelo Gemini "${alternativa}".`);
+          motor.modelo = alternativa;
         }
-        // Não existe ou continua ocupado: muda para outro Flash disponível.
-        console.log(`Gemini "${motor.modelo}" falhou (${ultimo.status || ""} ${ultimo.message}).`);
-        falhados.add(motor.modelo);
-        const alternativa = await escolherModeloGemini(cliente, [...falhados]).catch(() => null);
-        if (!alternativa) throw ultimo;
-        console.log(`A usar o modelo Gemini "${alternativa}".`);
-        motor.modelo = alternativa;
-        return this._gerar(pedido);
       }
+      throw ultimo || Object.assign(new Error("timed out"), { name: "TimeoutError" });
     },
     async _gerar({ system, messages, schema, timeout, contador }) {
       const resposta = await cliente.models.generateContent({

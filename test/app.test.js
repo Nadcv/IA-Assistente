@@ -317,3 +317,28 @@ test("Gemini ocupado: repete e, se continuar, muda de modelo", async () => {
   assert.equal(r.sugestoes[0], "a");
   assert.deepEqual(usados, ["gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"]);
 });
+
+test("Gemini: vários modelos ocupados seguidos, continua até um responder", async () => {
+  const usados = [];
+  const ocupados = ["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.5-flash"];
+  const clienteFalso = {
+    models: {
+      async generateContent(p) {
+        usados.push(p.model);
+        if (p.model === "gemini-flash-latest") throw Object.assign(new Error("not found"), { status: 404 });
+        if (ocupados.includes(p.model)) throw Object.assign(new Error("high demand"), { status: 503 });
+        return { text: '{"sugestoes":["ok","b","c"],"nota":""}' };
+      },
+      async list() {
+        return (async function* () {
+          for (const n of ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-2.5-flash"]) yield { name: "models/" + n, supportedActions: ["generateContent"] };
+        })();
+      },
+    },
+  };
+  const ia = criarIA(motorGemini(clienteFalso, "gemini-flash-latest"));
+  const r = await ia.sugerirResposta({ nomeDono: "Ana", instrucoes: "x", estiloMensagens: "x" }, { mensagem: "Olá" });
+  assert.equal(r.sugestoes[0], "ok");
+  assert.equal(ia.modelo, "gemini-2.5-flash");
+  assert.deepEqual(usados, ["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash", "gemini-2.5-flash"]);
+});
