@@ -449,14 +449,15 @@ async function falar(texto, sempre = false) {
   if (!texto) return;
   pararVoz();
   const voz = $("#escolhaVoz").value;
-  if (voz !== "telemovel") {
+  // Se a voz natural falhou há pouco (ex.: quota), não insiste durante 10 min.
+  if (voz !== "telemovel" && Date.now() > (guardado("vozNaturalFalhou", 0) + 10 * 60_000)) {
     try {
       const r = await fetch("/api/voz", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
         body: JSON.stringify({ texto, voz }),
       });
-      if (!r.ok) throw new Error("sem voz natural");
+      if (!r.ok) { guardar("vozNaturalFalhou", Date.now()); throw new Error("sem voz natural"); }
       const url = URL.createObjectURL(await r.blob());
       leitor.src = url;
       await new Promise((ok, falha) => {

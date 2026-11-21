@@ -272,7 +272,8 @@ test("erros da IA são explicados em português, sem segredos", () => {
   const comStatus = (status, message) => Object.assign(new Error(message), { status });
   assert.match(explicarErro(comStatus(400, "API key not valid. Please pass a valid API key."), g), /GEMINI_API_KEY/);
   assert.match(explicarErro(comStatus(404, "models/x is not found"), g), /GEMINI_MODEL/);
-  assert.match(explicarErro(comStatus(429, "Resource has been exhausted"), g), /limite de pedidos/);
+  assert.match(explicarErro(comStatus(429, "Resource has been exhausted"), g), /Espera um minuto/);
+  assert.match(explicarErro(comStatus(429, "Quota exceeded for GenerateRequestsPerDayPerProjectPerModel-FreeTier"), g), /quota de hoje/);
   assert.match(explicarErro(Object.assign(new Error("x"), { name: "TimeoutError" }), g), /demorou/);
   assert.match(explicarErro(comStatus(401, "invalid x-api-key"), { nome: "claude" }), /ANTHROPIC_API_KEY/);
 });
@@ -490,4 +491,23 @@ test("calendário: as tarefas do telemóvel ficam num link .ics secreto", async 
   assert.doesNotMatch(ics, /Já feita|Sem data/);
 
   assert.equal((await fetch(base + "/calendario/00000000000000000000000000000000.ics")).status, 404);
+});
+
+test("Gemini sem quota: muda logo para outro modelo (cada um tem a sua quota grátis)", async () => {
+  const usados = [];
+  const semQuota = ["gemini-2.5-flash", "gemini-2.0-flash"];
+  const clienteFalso = { models: {
+    async generateContent(p) {
+      usados.push(p.model);
+      if (semQuota.includes(p.model)) throw Object.assign(new Error("Quota exceeded for metric GenerateRequestsPerDayPerProjectPerModel-FreeTier"), { status: 429 });
+      return { text: '{"resposta":"Já está","tarefas":[]}' };
+    },
+    async list() { return (async function* () {
+      for (const n of ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-preview-tts"]) yield { name: "models/" + n };
+    })(); },
+  } };
+  const ia = criarIA(motorGemini(clienteFalso, "gemini-2.5-flash"));
+  const r = await ia.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "Olá" }] });
+  assert.equal(r.resposta, "Já está");
+  assert.deepEqual(usados, ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]);
 });

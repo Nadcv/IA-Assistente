@@ -114,8 +114,17 @@ export async function escolherModeloGemini(cliente, excluir = []) {
   const outros = nomes
     .filter((n) => /^gemini-.*flash/.test(n) && !/lite|tts|image|live|audio|embedding|thinking-exp/.test(n))
     .sort(porVersao);
-  return estaveis[0] || outros[0] || null;
+  // Último recurso: os "lite" (mais simples, mas com mais quota grátis).
+  const lites = nomes
+    .filter((n) => /^gemini-.*flash-lite/.test(n) && !/tts|image|live|audio/.test(n))
+    .sort(porVersao);
+  return estaveis[0] || outros[0] || lites[0] || null;
 }
+
+// Erro de quota (429): diz até quando evitar o modelo. No plano grátis cada
+// modelo tem a sua quota, por isso vale a pena mudar para outro.
+const ehQuota = (erro) => erro?.status === 429 || /quota|rate.?limit|resource.?exhausted/i.test(String(erro?.message));
+const fimDaQuota = (erro) => (/per.?day|daily/i.test(String(erro?.message)) ? Date.now() + 12 * 3600_000 : Date.now() + 65_000);
 
 // Gemini (Google). Plano grátis com limite de pedidos por dia.
 // "gemini-flash-latest" aponta para o Flash mais recente; se a chave não o
@@ -152,15 +161,16 @@ export function motorGemini(
             semPensamento = true;
             continue;
           }
-          const ocupado = ehOcupado(erro);
-          if (!ocupado && !ehNaoEncontrado(erro)) throw erro;
+          const quota = ehQuota(erro);
+          const ocupado = !quota && ehOcupado(erro);
+          if (!ocupado && !quota && !ehNaoEncontrado(erro)) throw erro;
           if (ocupado && !repetiu) {
             repetiu = true;
             await esperar(800);
             continue;
           }
           console.log(`Gemini "${motor.modelo}" falhou (${erro.status || ""}); a procurar outro modelo.`);
-          evitar.set(motor.modelo, ocupado ? Date.now() + 10 * 60_000 : Infinity);
+          evitar.set(motor.modelo, quota ? fimDaQuota(erro) : ocupado ? Date.now() + 10 * 60_000 : Infinity);
           repetiu = false;
           const alternativa = await escolherModeloGemini(cliente, aEvitar()).catch(() => null);
           if (!alternativa) break;
@@ -263,7 +273,9 @@ export function explicarErro(erro, motor = {}) {
   if (status === 404 || /not found/i.test(msg))
     return `O modelo "${motor.modelo}" não existe para esta chave. Muda a variável ${motor.nome === "gemini" ? "GEMINI_MODEL" : "CLAUDE_MODEL"} no Render.`;
   if (status === 429 || /quota|rate limit|resource.?exhausted/i.test(msg))
-    return `Chegaste ao limite de pedidos do ${ia}. Espera um pouco (ou até amanhã, no plano grátis).`;
+    return /per.?day|daily/i.test(msg)
+      ? `Os modelos grátis do ${ia} esgotaram a quota de hoje. Volta amanhã, ou usa uma segunda chave/IA.`
+      : `Muitos pedidos seguidos ao ${ia}. Espera um minuto e tenta outra vez.`;
   if (/credit balance|billing/i.test(msg)) return `A conta do ${ia} não tem créditos.`;
   if (status >= 500)
     return `O ${ia} (${motor.modelo || "?"}) está ocupado ou com problemas (erro ${status}). Tenta daqui a pouco. Detalhe: ${msg.slice(0, 150)}`;
