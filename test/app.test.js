@@ -8,7 +8,7 @@ process.env.TWILIO_VALIDAR = "false";
 const { criarApp } = await import("../src/server.js");
 const { criarArmazem, nomeDoContacto, estaNaLista } = await import("../src/armazem.js");
 const { redigir } = await import("../src/privacidade.js");
-const { criarIA, motorClaude, motorGemini, qualIA, custoIA } = await import("../src/ia.js");
+const { criarIA, motorClaude, motorGemini, qualIA, custoIA, explicarErro } = await import("../src/ia.js");
 
 let servidor, base, pasta, armazemTeste;
 const sms = [];
@@ -257,4 +257,14 @@ test("escolha da IA pelas variáveis de ambiente", () => {
   assert.equal(qualIA({ GEMINI_API_KEY: "g" }), "gemini");
   assert.equal(qualIA({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a" }), "claude");
   assert.equal(qualIA({}), "claude");
+});
+
+test("erros da IA são explicados em português, sem segredos", () => {
+  const g = { nome: "gemini", modelo: "gemini-flash-latest" };
+  const comStatus = (status, message) => Object.assign(new Error(message), { status });
+  assert.match(explicarErro(comStatus(400, "API key not valid. Please pass a valid API key."), g), /GEMINI_API_KEY/);
+  assert.match(explicarErro(comStatus(404, "models/x is not found"), g), /GEMINI_MODEL/);
+  assert.match(explicarErro(comStatus(429, "Resource has been exhausted"), g), /limite de pedidos/);
+  assert.match(explicarErro(Object.assign(new Error("x"), { name: "TimeoutError" }), g), /demorou/);
+  assert.match(explicarErro(comStatus(401, "invalid x-api-key"), { nome: "claude" }), /ANTHROPIC_API_KEY/);
 });

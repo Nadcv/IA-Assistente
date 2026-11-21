@@ -68,8 +68,21 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
       });
       res.json(r);
     } catch (erro) {
-      console.error("Erro ao sugerir resposta:", erro.message);
-      res.status(502).json({ erro: "A IA não respondeu. Tenta outra vez." });
+      console.error("Erro ao sugerir resposta:", erro.status || "", erro.message);
+      const motivo = ia.explicarErro ? ia.explicarErro(erro) : "A IA não respondeu. Tenta outra vez.";
+      res.status(502).json({ erro: motivo });
+    }
+  });
+
+  // Testa a ligação à IA com um pedido pequeno (botão nas Definições).
+  app.post("/api/testar-ia", exigirLogin, async (req, res) => {
+    const info = ia.diagnostico ? ia.diagnostico() : {};
+    try {
+      await ia.sugerirResposta(armazem.lerConfig(), { mensagem: "Olá! Tudo bem?", plataforma: "teste" });
+      res.json({ ...info, ok: true });
+    } catch (erro) {
+      console.error("Teste da IA falhou:", erro.status || "", erro.message);
+      res.json({ ...info, ok: false, erro: ia.explicarErro ? ia.explicarErro(erro) : erro.message });
     }
   });
 

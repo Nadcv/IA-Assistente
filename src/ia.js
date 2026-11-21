@@ -105,6 +105,26 @@ export function motorGemini(
   };
 }
 
+// Traduz erros das APIs numa explicação curta para o painel (sem segredos).
+export function explicarErro(erro, motor = {}) {
+  const ia = motor.nome === "gemini" ? "Gemini" : "Claude";
+  const chave = motor.nome === "gemini" ? "GEMINI_API_KEY" : "ANTHROPIC_API_KEY";
+  const msg = String(erro?.message || "");
+  const status = erro?.status;
+  if (erro?.name === "TimeoutError" || erro?.name === "AbortError" || /timed? ?out/i.test(msg))
+    return `O ${ia} demorou demasiado a responder. Tenta outra vez.`;
+  if (/api key|apiKey|x-api-key|authentication/i.test(msg) || status === 401)
+    return `A chave do ${ia} falta ou é inválida. Confirma a variável ${chave} no Render.`;
+  if (status === 403) return `A chave do ${ia} não tem permissão para este modelo.`;
+  if (status === 404 || /not found/i.test(msg))
+    return `O modelo "${motor.modelo}" não existe para esta chave. Muda a variável ${motor.nome === "gemini" ? "GEMINI_MODEL" : "CLAUDE_MODEL"} no Render.`;
+  if (status === 429 || /quota|rate limit|resource.?exhausted/i.test(msg))
+    return `Chegaste ao limite de pedidos do ${ia}. Espera um pouco (ou até amanhã, no plano grátis).`;
+  if (/credit balance|billing/i.test(msg)) return `A conta do ${ia} não tem créditos.`;
+  if (status >= 500) return `O ${ia} está com problemas neste momento. Tenta daqui a pouco.`;
+  return `Erro do ${ia}: ${msg.slice(0, 200)}`;
+}
+
 export function motorPorOmissao() {
   return qualIA() === "gemini" ? motorGemini() : motorClaude();
 }
@@ -211,6 +231,12 @@ function historicoParaMensagens(turnos) {
 export function criarIA(motor = motorPorOmissao()) {
   return {
     modelo: motor.modelo,
+    explicarErro: (erro) => explicarErro(erro, motor),
+    diagnostico: () => ({
+      ia: motor.nome,
+      modelo: motor.modelo,
+      chaveDefinida: Boolean(motor.nome === "gemini" ? process.env.GEMINI_API_KEY : process.env.ANTHROPIC_API_KEY),
+    }),
     // Próxima fala da IA durante uma chamada. Responde depressa (o Twilio
     // espera no máximo 15 s pelo webhook).
     async turnoChamada(config, chamada) {

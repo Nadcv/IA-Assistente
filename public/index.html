@@ -104,6 +104,11 @@
         <p id="okConfig" class="mut"></p>
         <button class="prim" type="submit">Guardar</button>
       </form>
+      <div class="card">
+        <b>Ligação à IA</b>
+        <p id="estadoIA" class="mut">Carrega no botão para testar se a IA está a responder.</p>
+        <button id="testarIA">🔌 Testar IA</button>
+      </div>
     </section>
   </main>
 </div>
@@ -241,6 +246,18 @@ $("#formConfig").onsubmit = async (e) => {
   dados.soContactos = $("#soContactos").checked;
   try { await api("/api/config", { method: "PUT", body: JSON.stringify(dados) }); $("#okConfig").textContent = "✅ Guardado"; }
   catch (err) { $("#okConfig").textContent = err.message; }
+};
+
+$("#testarIA").onclick = async () => {
+  const p = $("#estadoIA");
+  p.textContent = "A testar…";
+  try {
+    const r = await api("/api/testar-ia", { method: "POST" });
+    const nome = r.ia === "gemini" ? "Gemini" : "Claude";
+    p.textContent = r.ok
+      ? `✅ ${nome} (${r.modelo}) a funcionar.`
+      : `❌ ${nome} (${r.modelo}): ${r.erro}` + (r.chaveDefinida ? "" : " — a chave não está definida no servidor.");
+  } catch (err) { p.textContent = "❌ " + err.message; }
 };
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
