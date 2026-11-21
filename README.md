@@ -46,7 +46,8 @@ envias, com um toque.
 | [Render](https://render.com) (ou outro) | Servidor sempre ligado | ~7 $/mês |
 
 > Números portugueses (+351) no Twilio exigem um "Regulatory Bundle"
-> (documento de identificação e morada). Em alternativa podes usar um número de
+> (documento de identificação e morada), e a aprovação pode demorar alguns
+> dias: pede o número antes de quereres testar chamadas reais. Em alternativa podes usar um número de
 > outro país, mas o reencaminhamento pode custar mais na tua operadora.
 
 ### 2. Instalar o servidor
@@ -74,12 +75,14 @@ No teu telemóvel, marca estes códigos (funcionam na MEO, NOS e Vodafone; troca
 
 | Quando | Código para ativar | Para desativar |
 |---|---|---|
-| Não atendes | `**61*NUMERO#` | `##61#` |
+| Não atendes | `**61*NUMERO#` ou, para escolher quantos segundos toca antes (5–30), `**61*NUMERO**20#` | `##61#` |
 | Estás ocupado | `**67*NUMERO#` | `##67#` |
 | Sem rede / desligado | `**62*NUMERO#` | `##62#` |
 | Todas as anteriores | `**004*NUMERO#` | `##004#` |
 
-Podes também fazê-lo em Definições → Chamadas → Reencaminhamento.
+Os códigos podem variar um pouco entre operadoras: se algum não funcionar,
+confirma com a tua (MEO, NOS ou Vodafone) ou usa Definições → Chamadas →
+Reencaminhamento no telemóvel.
 
 ### 5. Painel e app no telemóvel
 
