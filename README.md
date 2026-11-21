@@ -5,6 +5,11 @@ Assistente pessoal com inteligência artificial (Gemini grátis ou Claude):
 - **🤖 Assistente por voz ou texto.** Perguntas, pedes para escrever uma
   mensagem ou um email, planear o dia... Carregas em 🎤 para falar e ele pode
   ler as respostas em voz alta. Também percebe imagens (📷).
+- **🛰️ Modo HUD.** Ecrã inteiro em estilo de ficção científica: um núcleo
+  animado que mostra quando está a ouvir, a pensar ou a falar, com relógio, o
+  tempo da tua zona (Open-Meteo, grátis), as próximas tarefas, conversa por
+  voz contínua e um **⚡ resumo do dia** falado. O nome do assistente
+  (por omissão "Íris") muda-se nas Definições.
 - **✅ Tarefas e lembretes.** Dizes "lembra-me amanhã às 9 de pagar a luz" e
   a tarefa é criada. O botão 📅 põe-na no calendário do telemóvel, com alerta.
   As tarefas e a conversa ficam guardadas no próprio telemóvel.

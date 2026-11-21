@@ -405,6 +405,7 @@ test("imagens chegam no formato certo ao Claude e ao Gemini", async () => {
   assert.deepEqual(pedidoClaude.messages[0].content[0], { type: "image", source: { type: "base64", media_type: "image/png", data: PNG_1PX } });
   assert.deepEqual(pedidoClaude.messages[0].content[1], { type: "text", text: "O que é isto?" });
   assert.match(pedidoClaude.system, /2026/);
+  assert.match(pedidoClaude.system, /És Íris/);
 
   await criarIA(motorGemini(gemini, "gemini-2.5-flash")).conversar(config, pedido);
   assert.deepEqual(pedidoGemini.contents[0].parts, [{ inlineData: { mimeType: "image/png", data: PNG_1PX } }, { text: "O que é isto?" }]);

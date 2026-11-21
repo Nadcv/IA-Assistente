@@ -5,6 +5,7 @@ import path from "node:path";
 export const CONFIG_PADRAO = {
   ativo: true,
   nomeDono: "", // o teu nome, ex.: "Nadio"
+  nomeAssistente: "Íris", // como o assistente se chama
   // O que a IA pode dizer sobre ti / a tua disponibilidade. Edita no painel.
   instrucoes:
     "Estou ocupado e não posso atender. Volto a ligar assim que puder. " +

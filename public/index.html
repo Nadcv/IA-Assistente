@@ -57,6 +57,49 @@
   .linha { display:flex; gap:8px; align-items:center; }
   .interruptor { display:flex; align-items:center; gap:10px; font-size:16px; color:var(--txt); }
   .interruptor input { width:auto; transform:scale(1.4); }
+
+  /* ---------- Modo HUD ---------- */
+  #hud { position:fixed; inset:0; z-index:50; background:radial-gradient(ellipse at center, #062033 0%, #020617 70%);
+    color:#7dd3fc; font-family: ui-monospace, "SF Mono", Menlo, monospace; overflow:hidden;
+    display:grid; grid-template-rows:auto 1fr auto; padding:max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom)); }
+  #hud::before { content:""; position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(0deg, rgba(125,211,252,.04) 0 1px, transparent 1px 3px); }
+  #hud::after { content:""; position:absolute; inset:0; pointer-events:none;
+    background-image:linear-gradient(rgba(56,189,248,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,.06) 1px, transparent 1px);
+    background-size:40px 40px; mask-image:radial-gradient(circle at center, transparent 30%, #000 80%); }
+  .hud-topo { display:flex; justify-content:space-between; gap:10px; position:relative; z-index:1; }
+  .hud-painel { border:1px solid rgba(56,189,248,.35); background:rgba(8,47,73,.35); border-radius:6px; padding:8px 10px;
+    box-shadow:0 0 12px rgba(56,189,248,.15) inset; font-size:12px; letter-spacing:.06em; }
+  .hud-painel h4 { margin:0 0 4px; font-size:10px; color:#38bdf8; letter-spacing:.2em; font-weight:600; }
+  .hud-hora { font-size:26px; color:#e0f2fe; letter-spacing:.08em; text-shadow:0 0 10px #38bdf8; }
+  .hud-centro { position:relative; z-index:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; min-height:0; }
+  #nucleo { width:min(62vw, 300px); aspect-ratio:1; cursor:pointer; -webkit-tap-highlight-color:transparent; filter:drop-shadow(0 0 18px rgba(56,189,248,.55)); }
+  #nucleo .anel { transform-origin:150px 150px; }
+  #nucleo .a1 { animation:girar 24s linear infinite; }
+  #nucleo .a2 { animation:girar 16s linear infinite reverse; }
+  #nucleo .a3 { animation:girar 9s linear infinite; }
+  #nucleo .miolo { transform-origin:150px 150px; animation:respirar 4s ease-in-out infinite; }
+  #hud.ouvir #nucleo .miolo { animation:respirar .9s ease-in-out infinite; }
+  #hud.ouvir #nucleo { filter:drop-shadow(0 0 28px rgba(34,211,238,.9)); }
+  #hud.pensar #nucleo .a2 { animation-duration:1.6s; }
+  #hud.pensar #nucleo .a3 { animation-duration:1s; }
+  #hud.falar #nucleo .miolo { animation:falarPulso .35s ease-in-out infinite alternate; }
+  #hud.erro #nucleo { filter:drop-shadow(0 0 22px rgba(248,113,113,.9)); }
+  @keyframes girar { to { transform:rotate(360deg); } }
+  @keyframes respirar { 0%,100% { transform:scale(.94); opacity:.85; } 50% { transform:scale(1.04); opacity:1; } }
+  @keyframes falarPulso { from { transform:scale(.92); } to { transform:scale(1.08); } }
+  #hudEstado { font-size:12px; letter-spacing:.35em; color:#38bdf8; text-shadow:0 0 8px #0ea5e9; }
+  #hudOuvido { color:#bae6fd; font-size:14px; min-height:1.2em; text-align:center; max-width:90vw; opacity:.8; }
+  #hudResposta { color:#e0f2fe; font-size:15px; line-height:1.5; text-align:center; max-width:min(92vw,560px); max-height:24vh;
+    overflow-y:auto; white-space:pre-wrap; font-family:system-ui, sans-serif; text-shadow:0 0 6px rgba(56,189,248,.5); }
+  .hud-base { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:end; position:relative; z-index:1; }
+  .hud-base ul { margin:0; padding-left:16px; } .hud-base li { margin:2px 0; color:#e0f2fe; }
+  .hud-base li.atr { color:#fca5a5; }
+  .hud-botoes { display:flex; flex-direction:column; gap:6px; }
+  .hud-botoes button { background:rgba(8,47,73,.6); color:#7dd3fc; border:1px solid rgba(56,189,248,.45); font-family:inherit;
+    font-size:12px; letter-spacing:.1em; padding:8px 10px; border-radius:6px; }
+  .hud-botoes button.lig { background:#0ea5e9; color:#020617; }
+  #hudTempo { cursor:pointer; text-align:right; }
 </style>
 </head>
 <body>
@@ -97,6 +140,9 @@
         <div class="linha" style="margin-top:10px; justify-content:space-between">
           <label class="interruptor" style="margin:0; font-size:14px"><input type="checkbox" id="lerVoz"> 🔊 Ler respostas</label>
           <button id="novaConversa">🧹 Nova conversa</button>
+        </div>
+        <button id="abrirHud" class="prim" style="width:100%; margin-top:12px">🛰️ Modo HUD (ecrã inteiro, por voz)</button>
+        <div>
         </div>
       </div>
     </section>
@@ -142,6 +188,8 @@
     <section id="definicoes" class="oculto">
       <form id="formConfig" class="card">
         <label class="interruptor"><input type="checkbox" id="ativo"> IA atende as chamadas</label>
+        <label for="nomeAssistente">Nome do assistente</label>
+        <input id="nomeAssistente" placeholder="Íris">
         <label for="nomeDono">O teu nome (a IA diz "assistente de …")</label>
         <input id="nomeDono">
         <label for="instrucoes">O que a IA pode dizer (disponibilidade, recados, regras)</label>
@@ -167,6 +215,48 @@
       </div>
     </section>
   </main>
+</div>
+
+<div id="hud" class="oculto repouso">
+  <div class="hud-topo">
+    <div class="hud-painel"><h4>SISTEMA · <span id="hudNome">ÍRIS</span></h4><div id="hudHora" class="hud-hora">--:--</div><div id="hudData"></div></div>
+    <div class="hud-painel" id="hudTempo"><h4>AMBIENTE</h4><div id="hudTempoTxt">📍 Toca para ativar</div></div>
+  </div>
+  <div class="hud-centro">
+    <svg id="nucleo" viewBox="0 0 300 300" aria-label="Toca para falar" role="button">
+      <defs>
+        <radialGradient id="gMiolo"><stop offset="0" stop-color="#e0f2fe"/><stop offset=".35" stop-color="#38bdf8"/><stop offset=".75" stop-color="#0369a1" stop-opacity=".5"/><stop offset="1" stop-color="#0c4a6e" stop-opacity="0"/></radialGradient>
+      </defs>
+      <g class="anel a1" fill="none" stroke="#38bdf8" stroke-opacity=".55">
+        <circle cx="150" cy="150" r="140" stroke-width="1"/>
+        <circle cx="150" cy="150" r="132" stroke-width="6" stroke-dasharray="2 10"/>
+      </g>
+      <g class="anel a2" fill="none" stroke="#7dd3fc">
+        <circle cx="150" cy="150" r="112" stroke-width="3" stroke-dasharray="70 30 20 30" stroke-opacity=".8"/>
+        <circle cx="150" cy="150" r="102" stroke-width="1" stroke-opacity=".4"/>
+      </g>
+      <g class="anel a3" fill="none" stroke="#22d3ee">
+        <circle cx="150" cy="150" r="86" stroke-width="10" stroke-dasharray="4 14" stroke-opacity=".7"/>
+        <path d="M150 58 A92 92 0 0 1 242 150" stroke-width="2"/>
+        <path d="M150 242 A92 92 0 0 1 58 150" stroke-width="2"/>
+      </g>
+      <g class="miolo">
+        <circle cx="150" cy="150" r="70" fill="url(#gMiolo)"/>
+        <circle cx="150" cy="150" r="30" fill="none" stroke="#e0f2fe" stroke-width="2" stroke-opacity=".9"/>
+      </g>
+    </svg>
+    <div id="hudEstado">EM ESPERA</div>
+    <div id="hudOuvido"></div>
+    <div id="hudResposta">Toca no núcleo para falar.</div>
+  </div>
+  <div class="hud-base">
+    <div class="hud-painel"><h4>PRÓXIMAS TAREFAS</h4><ul id="hudTarefas"></ul></div>
+    <div class="hud-botoes">
+      <button id="hudBriefing">⚡ RESUMO</button>
+      <button id="hudContinuo">⟲ CONTÍNUO</button>
+      <button id="hudSair">✕ SAIR</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -292,40 +382,59 @@ function mostrarConversa() {
   }
   chat.scrollTop = chat.scrollHeight;
 }
-function falar(texto) {
-  if (!$("#lerVoz").checked || !("speechSynthesis" in window)) return;
-  speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(texto.replace(/[*#_`]/g, ""));
-  u.lang = "pt-PT";
-  const voz = speechSynthesis.getVoices().find((v) => v.lang === "pt-PT") || speechSynthesis.getVoices().find((v) => v.lang.startsWith("pt"));
-  if (voz) u.voice = voz;
-  speechSynthesis.speak(u);
+// Lê o texto em voz alta. Devolve uma promessa que acaba quando a voz termina.
+function falar(texto, sempre = false) {
+  return new Promise((ok) => {
+    if ((!sempre && !$("#lerVoz").checked) || !("speechSynthesis" in window)) return ok();
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(texto.replace(/[*#_`]/g, ""));
+    u.lang = "pt-PT";
+    const vozes = speechSynthesis.getVoices();
+    const voz = vozes.find((v) => v.lang === "pt-PT") || vozes.find((v) => v.lang.startsWith("pt"));
+    if (voz) u.voice = voz;
+    u.onend = u.onerror = () => ok();
+    speechSynthesis.speak(u);
+  });
+}
+
+// Envia uma pergunta ao assistente, guarda a conversa e cria as tarefas.
+// textoEnviado (opcional) substitui o texto mostrado no pedido à IA.
+async function perguntarIA(texto, { imagem = null, textoEnviado = null } = {}) {
+  conversa.push({ role: "user", texto: texto || "(imagem)" });
+  const historico = conversa.slice(-20).map((m) => ({ ...m }));
+  if (textoEnviado) historico[historico.length - 1].texto = textoEnviado;
+  try {
+    const r = await api("/api/conversar", { method: "POST", body: JSON.stringify({ historico, imagem }) });
+    conversa.push({ role: "assistant", texto: r.resposta });
+    conversa = conversa.slice(-40);
+    guardar("conversa", conversa);
+    for (const t of r.tarefas || []) juntarTarefa(t.titulo, t.quando, t.notas);
+    return r;
+  } catch (err) {
+    conversa.pop(); // a pergunta não teve resposta; deixa voltar a tentar
+    throw err;
+  }
 }
 async function enviarPergunta() {
   const texto = $("#pergunta").value.trim();
   const imagem = imagemChat.valor;
   if (!texto && !imagem) return;
-  conversa.push({ role: "user", texto: texto || "(imagem)" });
   $("#pergunta").value = "";
   imagemChat.limpar();
   mostrarConversa();
+  $("#chat").append(el("div", { className: "bolha eu", textContent: texto || "(imagem)" }));
   const aPensar = el("div", { className: "bolha ela", textContent: "…" });
   $("#chat").append(aPensar); $("#chat").scrollTop = $("#chat").scrollHeight;
   $("#enviar").disabled = true;
   try {
-    const r = await api("/api/conversar", { method: "POST", body: JSON.stringify({ historico: conversa.slice(-20), imagem }) });
-    conversa.push({ role: "assistant", texto: r.resposta });
-    conversa = conversa.slice(-40);
-    guardar("conversa", conversa);
+    const r = await perguntarIA(texto, { imagem });
     mostrarConversa();
     for (const t of r.tarefas || []) {
-      juntarTarefa(t.titulo, t.quando, t.notas);
       $("#chat").append(el("div", { className: "criada", textContent: "✅ Tarefa criada: " + t.titulo + (t.quando ? " — " + dataBonita(t.quando) : "") }));
     }
     $("#chat").scrollTop = $("#chat").scrollHeight;
     falar(r.resposta);
   } catch (err) {
-    conversa.pop(); // a pergunta não teve resposta; deixa voltar a tentar
     $("#pergunta").value = texto;
     aPensar.textContent = err.message; aPensar.classList.add("erro");
   } finally { $("#enviar").disabled = false; }
@@ -466,13 +575,14 @@ async function carregarChamadas() {
 $("#atualizar").onclick = carregarChamadas;
 
 // --- Definições ---
-const campos = ["nomeDono", "instrucoes", "contactos", "bloqueados", "diasRetencao", "numeroNotificacoes", "estiloMensagens"];
+const campos = ["nomeAssistente", "nomeDono", "instrucoes", "contactos", "bloqueados", "diasRetencao", "numeroNotificacoes", "estiloMensagens"];
 async function carregarConfig() {
   try {
     const c = await api("/api/config");
     campos.forEach((k) => $("#" + k).value = c[k] || "");
     $("#ativo").checked = !!c.ativo;
     $("#soContactos").checked = !!c.soContactos;
+    nomeAssistente = c.nomeAssistente || "Íris";
   } catch {}
 }
 $("#formConfig").onsubmit = async (e) => {
@@ -495,6 +605,139 @@ $("#testarIA").onclick = async () => {
       : `❌ ${nome} (${r.modelo}): ${r.erro}` + (r.chaveDefinida ? "" : " — a chave não está definida no servidor.");
   } catch (err) { p.textContent = "❌ " + err.message; }
 };
+
+// ---------- Modo HUD ----------
+let nomeAssistente = "Íris";
+const hud = {
+  continuo: guardado("hudContinuo", false),
+  rec: null,
+  relogio: null,
+  ocupado: false,
+};
+function hudEstado(estado, texto) {
+  const fechado = $("#hud").classList.contains("oculto"); // não reabrir se já saíste
+  $("#hud").className = estado + (fechado ? " oculto" : "");
+  $("#hudEstado").textContent = texto;
+}
+function hudRelogio() {
+  const agora = new Date();
+  $("#hudHora").textContent = agora.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  $("#hudData").textContent = agora.toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" }).toUpperCase();
+}
+function hudTarefas() {
+  const pend = tarefas.filter((t) => !t.feita).sort((a, b) => ((a.quando || "9") < (b.quando || "9") ? -1 : 1)).slice(0, 3);
+  const ul = $("#hudTarefas");
+  if (!pend.length) { ul.replaceChildren(el("li", { textContent: "Nada pendente." })); return; }
+  ul.replaceChildren(...pend.map((t) => el("li", {
+    className: t.quando && new Date(t.quando) < new Date() ? "atr" : "",
+    textContent: t.titulo + (t.quando ? " · " + new Date(t.quando).toLocaleString("pt-PT", { weekday: "short", hour: "2-digit", minute: "2-digit" }) : ""),
+  })));
+}
+// Tempo atual (Open-Meteo, grátis e sem chave). Pede a localização só quando tocas.
+const CODIGOS_TEMPO = { 0: "céu limpo", 1: "pouco nublado", 2: "parcialmente nublado", 3: "nublado", 45: "nevoeiro", 48: "nevoeiro",
+  51: "chuvisco", 53: "chuvisco", 55: "chuvisco forte", 61: "chuva fraca", 63: "chuva", 65: "chuva forte", 71: "neve", 73: "neve", 75: "neve forte",
+  80: "aguaceiros", 81: "aguaceiros", 82: "aguaceiros fortes", 95: "trovoada", 96: "trovoada", 99: "trovoada" };
+let tempoAtual = "";
+async function hudTempo(pedir = false) {
+  let local = guardado("local", null);
+  if (!local && pedir) {
+    local = await new Promise((ok) => navigator.geolocation.getCurrentPosition(
+      (p) => ok({ lat: +p.coords.latitude.toFixed(2), lon: +p.coords.longitude.toFixed(2) }), () => ok(null), { timeout: 10000 }));
+    if (local) guardar("local", local);
+  }
+  if (!local) return;
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${local.lat}&longitude=${local.lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`;
+    const d = await (await fetch(url)).json();
+    const desc = CODIGOS_TEMPO[d.current.weather_code] || "";
+    tempoAtual = `${Math.round(d.current.temperature_2m)}°C, ${desc} (máx. ${Math.round(d.daily.temperature_2m_max[0])}°, mín. ${Math.round(d.daily.temperature_2m_min[0])}°)`;
+    $("#hudTempoTxt").textContent = `${Math.round(d.current.temperature_2m)}°C · ${desc}`.toUpperCase();
+  } catch { $("#hudTempoTxt").textContent = "SEM DADOS"; }
+}
+$("#hudTempo").onclick = () => hudTempo(true);
+
+// Escreve a resposta letra a letra (efeito de terminal).
+function hudEscrever(texto) {
+  const alvo = $("#hudResposta");
+  alvo.textContent = "";
+  let i = 0;
+  const passo = () => { if (i <= texto.length) { alvo.textContent = texto.slice(0, i); i += 2; requestAnimationFrame(passo); } };
+  passo();
+}
+async function hudPerguntar(mostrado, enviado = null) {
+  if (hud.ocupado) return;
+  hud.ocupado = true;
+  hudEstado("pensar", "A PROCESSAR");
+  try {
+    const r = await perguntarIA(mostrado, { textoEnviado: enviado });
+    mostrarConversa(); hudTarefas();
+    const extra = (r.tarefas || []).map((t) => "✅ " + t.titulo).join("\n");
+    hudEscrever(r.resposta + (extra ? "\n" + extra : ""));
+    hudEstado("falar", "A RESPONDER");
+    await falar(r.resposta, true);
+    hudEstado("repouso", "EM ESPERA");
+    hud.ocupado = false;
+    if (hud.continuo && !$("#hud").classList.contains("oculto")) hudOuvir();
+  } catch (err) {
+    hud.ocupado = false;
+    hudEstado("erro", "FALHA");
+    $("#hudResposta").textContent = err.message;
+  }
+}
+function hudOuvir() {
+  if (!Reconhecimento) { $("#hudResposta").textContent = "Este browser não tem reconhecimento de voz. Usa o Safari ou o Chrome."; return; }
+  if (hud.rec) { hud.rec.stop(); return; }
+  speechSynthesis.cancel();
+  const rec = (hud.rec = new Reconhecimento());
+  rec.lang = "pt-PT"; rec.interimResults = true;
+  let dito = "";
+  rec.onresult = (e) => { dito = [...e.results].map((r) => r[0].transcript).join(""); $("#hudOuvido").textContent = "« " + dito + " »"; };
+  rec.onerror = (e) => { if (e.error === "not-allowed") $("#hudResposta").textContent = "Dá permissão ao microfone nas definições do browser."; };
+  rec.onend = () => {
+    hud.rec = null;
+    if (dito.trim()) hudPerguntar(dito.trim());
+    else hudEstado("repouso", "EM ESPERA");
+  };
+  $("#hudOuvido").textContent = "";
+  hudEstado("ouvir", "A OUVIR");
+  try { rec.start(); } catch { hud.rec = null; hudEstado("repouso", "EM ESPERA"); }
+}
+$("#nucleo").onclick = () => { if (!hud.ocupado) hudOuvir(); else speechSynthesis.cancel(); };
+$("#hudContinuo").classList.toggle("lig", hud.continuo);
+$("#hudContinuo").onclick = () => {
+  hud.continuo = !hud.continuo; guardar("hudContinuo", hud.continuo);
+  $("#hudContinuo").classList.toggle("lig", hud.continuo);
+};
+$("#hudBriefing").onclick = () => {
+  const hoje = new Date(); hoje.setHours(23, 59, 59);
+  const lista = tarefas.filter((t) => !t.feita && (!t.quando || new Date(t.quando) <= hoje))
+    .map((t) => "- " + t.titulo + (t.quando ? " (" + dataBonita(t.quando) + (new Date(t.quando) < new Date() ? ", atrasada" : "") + ")" : "")).join("\n");
+  hudPerguntar("⚡ Resumo do dia",
+    `Faz-me um resumo falado e curto do meu dia (máx. 5 frases), como um briefing: cumprimenta-me conforme a hora, diz o tempo e o que tenho pendente, por ordem de prioridade, e termina com uma sugestão útil.
+Tempo: ${tempoAtual || "sem dados"}
+Tarefas pendentes para hoje (e atrasadas):
+${lista || "(nenhuma)"}`);
+};
+function abrirHud() {
+  $("#hud").classList.remove("oculto");
+  $("#hudNome").textContent = nomeAssistente.toUpperCase();
+  hudRelogio(); hud.relogio = setInterval(hudRelogio, 1000);
+  hudTarefas(); hudTempo(false);
+  hudEstado("repouso", "EM ESPERA");
+  const h = new Date().getHours();
+  const ola = h < 6 ? "Boa noite" : h < 13 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite";
+  $("#hudResposta").textContent = `${ola}. ${nomeAssistente} online. Toca no núcleo para falar.`;
+  falar(`${ola}. ${nomeAssistente} online.`, true);
+}
+function fecharHud() {
+  if (hud.rec) hud.rec.abort();
+  speechSynthesis.cancel();
+  clearInterval(hud.relogio);
+  $("#hud").classList.add("oculto");
+  mostrarConversa();
+}
+$("#abrirHud").onclick = abrirHud;
+$("#hudSair").onclick = fecharHud;
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
 mostrar();
