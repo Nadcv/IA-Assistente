@@ -294,3 +294,26 @@ test("Gemini: se o modelo não existir, escolhe sozinho um Flash disponível", a
   assert.deepEqual(usados, ["gemini-flash-latest", "gemini-2.5-flash"]);
   assert.equal(ia.modelo, "gemini-2.5-flash");
 });
+
+test("Gemini ocupado: repete e, se continuar, muda de modelo", async () => {
+  const usados = [];
+  const clienteFalso = {
+    models: {
+      async generateContent(p) {
+        usados.push(p.model);
+        if (p.model === "gemini-2.5-flash") throw Object.assign(new Error("The model is overloaded"), { status: 503 });
+        return { text: '{"sugestoes":["a","b","c"],"nota":""}' };
+      },
+      async list() {
+        return (async function* () {
+          yield { name: "models/gemini-2.5-flash", supportedActions: ["generateContent"] };
+          yield { name: "models/gemini-2.0-flash", supportedActions: ["generateContent"] };
+        })();
+      },
+    },
+  };
+  const ia = criarIA(motorGemini(clienteFalso, "gemini-2.5-flash"));
+  const r = await ia.sugerirResposta({ nomeDono: "Ana", instrucoes: "x", estiloMensagens: "x" }, { mensagem: "Olá" });
+  assert.equal(r.sugestoes[0], "a");
+  assert.deepEqual(usados, ["gemini-2.5-flash", "gemini-2.5-flash", "gemini-2.0-flash"]);
+});

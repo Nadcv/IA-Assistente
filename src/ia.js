@@ -71,11 +71,12 @@ function schemaGemini(schema) {
 const ehNaoEncontrado = (erro) => erro?.status === 404 || /not found/i.test(String(erro?.message));
 
 // Procura, na lista de modelos da chave, o Gemini Flash estável mais recente.
-export async function escolherModeloGemini(cliente) {
+export async function escolherModeloGemini(cliente, excluir = []) {
   const nomes = [];
   for await (const m of await cliente.models.list()) {
     if (m.supportedActions && !m.supportedActions.includes("generateContent")) continue;
-    if (m.name) nomes.push(m.name.replace(/^models\//, ""));
+    const nome = m.name?.replace(/^models\//, "");
+    if (nome && !excluir.includes(nome)) nomes.push(nome);
   }
   const versao = (n) => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [])[1] || 0);
   const porVersao = (a, b) => versao(b) - versao(a);
@@ -93,7 +94,9 @@ export function motorGemini(
   cliente = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY }),
   modelo = process.env.GEMINI_MODEL || "gemini-flash-latest",
 ) {
-  let procurou = false;
+  const falhados = new Set(); // modelos que não existem ou estão sempre ocupados
+  const ehOcupado = (erro) => erro?.status >= 500 || /overloaded|unavailable|internal/i.test(String(erro?.message));
+  const esperar = (ms) => new Promise((ok) => setTimeout(ok, ms));
   const motor = {
     nome: "gemini",
     modelo,
@@ -101,11 +104,24 @@ export function motorGemini(
       try {
         return await this._gerar(pedido);
       } catch (erro) {
-        if (!ehNaoEncontrado(erro) || procurou) throw erro;
-        procurou = true;
-        const alternativa = await escolherModeloGemini(cliente).catch(() => null);
-        if (!alternativa || alternativa === motor.modelo) throw erro;
-        console.log(`Modelo Gemini "${motor.modelo}" não disponível; a usar "${alternativa}".`);
+        if (!ehNaoEncontrado(erro) && !ehOcupado(erro)) throw erro;
+        let ultimo = erro;
+        // Ocupado: tenta outra vez o mesmo modelo, um segundo depois.
+        if (ehOcupado(erro)) {
+          await esperar(1000);
+          try {
+            return await this._gerar(pedido);
+          } catch (e) {
+            if (!ehOcupado(e)) throw e;
+            ultimo = e;
+          }
+        }
+        // Não existe ou continua ocupado: muda para outro Flash disponível.
+        console.log(`Gemini "${motor.modelo}" falhou (${ultimo.status || ""} ${ultimo.message}).`);
+        falhados.add(motor.modelo);
+        const alternativa = await escolherModeloGemini(cliente, [...falhados]).catch(() => null);
+        if (!alternativa) throw ultimo;
+        console.log(`A usar o modelo Gemini "${alternativa}".`);
         motor.modelo = alternativa;
         return this._gerar(pedido);
       }
@@ -155,7 +171,8 @@ export function explicarErro(erro, motor = {}) {
   if (status === 429 || /quota|rate limit|resource.?exhausted/i.test(msg))
     return `Chegaste ao limite de pedidos do ${ia}. Espera um pouco (ou até amanhã, no plano grátis).`;
   if (/credit balance|billing/i.test(msg)) return `A conta do ${ia} não tem créditos.`;
-  if (status >= 500) return `O ${ia} está com problemas neste momento. Tenta daqui a pouco.`;
+  if (status >= 500)
+    return `O ${ia} (${motor.modelo || "?"}) está ocupado ou com problemas (erro ${status}). Tenta daqui a pouco. Detalhe: ${msg.slice(0, 150)}`;
   return `Erro do ${ia}: ${msg.slice(0, 200)}`;
 }
 
