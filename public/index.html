@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assistente IA</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icone.svg">
+<meta name="theme-color" content="#0f172a">
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --txt:#e2e8f0; --mut:#94a3b8; --ac:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:16px; display:flex; align-items:center; gap:10px; }
+  header h1 { font-size:20px; margin:0; flex:1; }
+  nav { display:flex; gap:6px; padding:0 16px; }
+  nav button { flex:1; }
+  main { padding:16px; max-width:720px; margin:0 auto; }
+  .card { background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; }
+  label { display:block; font-size:14px; color:var(--mut); margin:10px 0 4px; }
+  input, textarea, select { width:100%; padding:10px; border-radius:10px; border:1px solid #334155; background:#0b1220; color:var(--txt); font:inherit; }
+  textarea { min-height:90px; resize:vertical; }
+  button { padding:10px 14px; border-radius:10px; border:0; background:#334155; color:var(--txt); font:inherit; cursor:pointer; }
+  button.prim { background:var(--ac); color:#0f172a; font-weight:600; }
+  button.ativo { background:var(--ac); color:#0f172a; }
+  .mut { color:var(--mut); font-size:14px; }
+  .sug { background:#0b1220; border:1px solid #334155; border-radius:10px; padding:12px; margin-top:10px; white-space:pre-wrap; }
+  .sug button { margin-top:8px; }
+  .nota { color:var(--warn); margin-top:10px; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; font-weight:600; }
+  .alta { background:var(--err); } .media { background:var(--warn); color:#000; } .baixa { background:var(--ok); color:#000; }
+  .transc { font-size:14px; margin-top:8px; display:none; }
+  .transc.aberta { display:block; }
+  .transc p { margin:4px 0; }
+  .oculto { display:none !important; }
+  .linha { display:flex; gap:8px; align-items:center; }
+  .interruptor { display:flex; align-items:center; gap:10px; font-size:16px; color:var(--txt); }
+  .interruptor input { width:auto; transform:scale(1.4); }
+</style>
+</head>
+<body>
+<header><h1>🤖 Assistente IA</h1><button id="sair" class="oculto">Sair</button></header>
+
+<main id="login" class="oculto">
+  <div class="card">
+    <h2>Entrar</h2>
+    <form id="formLogin">
+      <label for="senha">Palavra-passe do painel</label>
+      <input id="senha" type="password" autocomplete="current-password" required>
+      <p id="erroLogin" class="nota"></p>
+      <button class="prim" type="submit">Entrar</button>
+    </form>
+  </div>
+</main>
+
+<div id="app" class="oculto">
+  <nav>
+    <button data-sec="mensagens" class="ativo">💬 Mensagens</button>
+    <button data-sec="chamadas">📞 Chamadas</button>
+    <button data-sec="definicoes">⚙️ Definições</button>
+  </nav>
+  <main>
+    <section id="mensagens">
+      <div class="card">
+        <p class="mut">Recebeste uma mensagem no Instagram, Facebook, WhatsApp…? Cola-a aqui (ou usa <b>Partilhar → Assistente</b> no telemóvel) e escolhe uma resposta para copiar.</p>
+        <label for="plataforma">Plataforma</label>
+        <select id="plataforma">
+          <option>Instagram</option><option>Facebook / Messenger</option><option>WhatsApp</option><option>SMS</option><option>Email</option><option>Outra</option>
+        </select>
+        <label for="mensagem">Mensagem recebida</label>
+        <textarea id="mensagem" placeholder="Ex.: Olá! Ainda tens a bicicleta à venda?"></textarea>
+        <label for="contexto">Contexto (opcional)</label>
+        <input id="contexto" placeholder="Ex.: já vendi a bicicleta; quero recusar com simpatia">
+        <p></p>
+        <button id="sugerir" class="prim">✨ Sugerir respostas</button>
+        <div id="resultado"></div>
+      </div>
+    </section>
+
+    <section id="chamadas" class="oculto">
+      <div class="linha" style="margin-bottom:12px"><button id="atualizar">🔄 Atualizar</button></div>
+      <div id="listaChamadas"><p class="mut">A carregar…</p></div>
+    </section>
+
+    <section id="definicoes" class="oculto">
+      <form id="formConfig" class="card">
+        <label class="interruptor"><input type="checkbox" id="ativo"> IA atende as chamadas</label>
+        <label for="nomeDono">O teu nome (a IA diz "assistente de …")</label>
+        <input id="nomeDono">
+        <label for="instrucoes">O que a IA pode dizer (disponibilidade, recados, regras)</label>
+        <textarea id="instrucoes" rows="5"></textarea>
+        <label for="contactos">Contactos conhecidos (um por linha: <code>Nome: +351912345678</code>)</label>
+        <textarea id="contactos" rows="4"></textarea>
+        <label for="numeroNotificacoes">O teu telemóvel, para receber o resumo por SMS</label>
+        <input id="numeroNotificacoes" placeholder="+351912345678">
+        <label for="estiloMensagens">Estilo das respostas às mensagens</label>
+        <input id="estiloMensagens">
+        <p id="okConfig" class="mut"></p>
+        <button class="prim" type="submit">Guardar</button>
+      </form>
+    </section>
+  </main>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+let token = localStorage.getItem("token");
+
+async function api(caminho, opcoes = {}) {
+  const r = await fetch(caminho, {
+    ...opcoes,
+    headers: { "Content-Type": "application/json", Authorization: "Bearer " + token, ...(opcoes.headers || {}) },
+  });
+  if (r.status === 401 && caminho !== "/api/entrar") { sair(); throw new Error("Sessão expirada"); }
+  const dados = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(dados.erro || "Erro " + r.status);
+  return dados;
+}
+
+function mostrar() {
+  $("#login").classList.toggle("oculto", !!token);
+  $("#app").classList.toggle("oculto", !token);
+  $("#sair").classList.toggle("oculto", !token);
+  if (token) { carregarConfig(); }
+}
+function sair() { token = null; localStorage.removeItem("token"); mostrar(); }
+$("#sair").onclick = sair;
+
+$("#formLogin").onsubmit = async (e) => {
+  e.preventDefault();
+  $("#erroLogin").textContent = "";
+  try {
+    const { token: t } = await api("/api/entrar", { method: "POST", body: JSON.stringify({ senha: $("#senha").value }) });
+    token = t; localStorage.setItem("token", t); mostrar();
+  } catch (err) { $("#erroLogin").textContent = err.message; }
+};
+
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("ativo", x === b));
+  document.querySelectorAll("main section").forEach((s) => s.classList.toggle("oculto", s.id !== b.dataset.sec));
+  if (b.dataset.sec === "chamadas") carregarChamadas();
+});
+
+// --- Mensagens ---
+function el(tag, props = {}, ...filhos) {
+  const n = Object.assign(document.createElement(tag), props);
+  n.append(...filhos);
+  return n;
+}
+$("#sugerir").onclick = async () => {
+  const res = $("#resultado");
+  res.replaceChildren(el("p", { className: "mut", textContent: "A pensar…" }));
+  $("#sugerir").disabled = true;
+  try {
+    const r = await api("/api/sugerir", { method: "POST", body: JSON.stringify({
+      mensagem: $("#mensagem").value, plataforma: $("#plataforma").value, contexto: $("#contexto").value,
+    }) });
+    res.replaceChildren();
+    if (r.nota) res.append(el("p", { className: "nota", textContent: "⚠️ " + r.nota }));
+    for (const s of r.sugestoes) {
+      const botao = el("button", { textContent: "📋 Copiar" });
+      botao.onclick = async () => { await navigator.clipboard.writeText(s); botao.textContent = "✅ Copiado"; };
+      res.append(el("div", { className: "sug" }, el("div", { textContent: s }), botao));
+    }
+  } catch (err) {
+    res.replaceChildren(el("p", { className: "nota", textContent: err.message }));
+  } finally { $("#sugerir").disabled = false; }
+};
+
+// Texto que chegou pelo botão "Partilhar" do telemóvel.
+const qs = new URLSearchParams(location.search);
+const partilhado = [qs.get("titulo"), qs.get("texto"), qs.get("link")].filter(Boolean).join("\n");
+if (partilhado) { $("#mensagem").value = partilhado; history.replaceState(null, "", "/"); }
+
+// --- Chamadas ---
+async function carregarChamadas() {
+  const lista = $("#listaChamadas");
+  try {
+    const chamadas = await api("/api/chamadas");
+    if (!chamadas.length) { lista.replaceChildren(el("p", { className: "mut", textContent: "Ainda não há chamadas atendidas." })); return; }
+    lista.replaceChildren(...chamadas.map((c) => {
+      const r = c.resumo || {};
+      const transc = el("div", { className: "transc" },
+        ...c.turnos.map((t) => el("p", {}, el("b", { textContent: (t.quem === "ia" ? "IA" : "Pessoa") + ": " }), t.texto)));
+      const ver = el("button", { textContent: "Ver conversa" });
+      ver.onclick = () => transc.classList.toggle("aberta");
+      return el("div", { className: "card" },
+        el("div", { className: "linha" },
+          el("span", { className: "tag " + (r.urgencia || "baixa"), textContent: r.urgencia || "—" }),
+          el("b", { textContent: r.quem || c.nomeContacto || c.de || "Desconhecido" }),
+          el("span", { className: "mut", textContent: new Date(c.inicio).toLocaleString("pt-PT") })),
+        el("p", { textContent: r.assunto || "(sem resumo)" }),
+        r.acao ? el("p", { className: "mut", textContent: "👉 " + r.acao }) : "",
+        r.contactoDeixado ? el("p", { className: "mut", textContent: "📞 " + r.contactoDeixado }) : "",
+        el("p", { className: "mut", textContent: "Número: " + (c.de || "privado") }),
+        ver, transc);
+    }));
+  } catch (err) { lista.replaceChildren(el("p", { className: "nota", textContent: err.message })); }
+}
+$("#atualizar").onclick = carregarChamadas;
+
+// --- Definições ---
+const campos = ["nomeDono", "instrucoes", "contactos", "numeroNotificacoes", "estiloMensagens"];
+async function carregarConfig() {
+  try {
+    const c = await api("/api/config");
+    campos.forEach((k) => $("#" + k).value = c[k] || "");
+    $("#ativo").checked = !!c.ativo;
+  } catch {}
+}
+$("#formConfig").onsubmit = async (e) => {
+  e.preventDefault();
+  const dados = Object.fromEntries(campos.map((k) => [k, $("#" + k).value]));
+  dados.ativo = $("#ativo").checked;
+  try { await api("/api/config", { method: "PUT", body: JSON.stringify(dados) }); $("#okConfig").textContent = "✅ Guardado"; }
+  catch (err) { $("#okConfig").textContent = err.message; }
+};
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
+mostrar();
+</script>
+</body>
+</html>

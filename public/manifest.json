@@ -1,0 +1,14 @@
+{
+  "name": "Assistente IA",
+  "short_name": "Assistente",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0f172a",
+  "icons": [{ "src": "/icone.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }],
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": { "title": "titulo", "text": "texto", "url": "link" }
+  }
+}

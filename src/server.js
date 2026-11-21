@@ -1,0 +1,83 @@
+// Servidor principal: webhooks de voz (Twilio) + painel web + assistente de mensagens.
+import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import express from "express";
+import { criarArmazem } from "./armazem.js";
+import { criarIA } from "./ia.js";
+import { criarNotificador } from "./notificar.js";
+import { rotasVoz } from "./voz.js";
+
+const aqui = path.dirname(fileURLToPath(import.meta.url));
+
+export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_SENHA } = {}) {
+  armazem ??= criarArmazem();
+  ia ??= criarIA();
+  notificador ??= criarNotificador();
+
+  const app = express();
+  app.disable("x-powered-by");
+  app.set("trust proxy", 1);
+
+  app.use("/voz", rotasVoz({ ia, armazem, notificador }));
+  app.use(express.static(path.join(aqui, "..", "public")));
+  app.use("/api", express.json({ limit: "100kb" }));
+
+  // --- Autenticação simples do painel (uma palavra-passe, PAINEL_SENHA) ---
+  const segredo = process.env.SEGREDO_SESSAO || crypto.randomBytes(32).toString("hex");
+  const tokenEsperado = senha ? crypto.createHmac("sha256", segredo).update(senha).digest("hex") : null;
+  const igual = (a, b) => {
+    const x = Buffer.from(String(a));
+    const y = Buffer.from(String(b));
+    return x.length === y.length && crypto.timingSafeEqual(x, y);
+  };
+  const falhas = new Map(); // ip -> {n, ate}
+
+  app.post("/api/entrar", (req, res) => {
+    if (!tokenEsperado) return res.status(503).json({ erro: "Define PAINEL_SENHA no servidor." });
+    const f = falhas.get(req.ip);
+    if (f && f.n >= 10 && f.ate > Date.now()) {
+      return res.status(429).json({ erro: "Demasiadas tentativas. Tenta daqui a 15 minutos." });
+    }
+    if (!igual(req.body?.senha || "", senha)) {
+      falhas.set(req.ip, { n: (f && f.ate > Date.now() ? f.n : 0) + 1, ate: Date.now() + 15 * 60_000 });
+      return res.status(401).json({ erro: "Palavra-passe errada." });
+    }
+    falhas.delete(req.ip);
+    res.json({ token: tokenEsperado });
+  });
+
+  const exigirLogin = (req, res, next) => {
+    const t = (req.get("Authorization") || "").replace(/^Bearer /, "");
+    if (!tokenEsperado || !igual(t, tokenEsperado)) return res.status(401).json({ erro: "Sessão inválida." });
+    next();
+  };
+
+  app.get("/api/config", exigirLogin, (req, res) => res.json(armazem.lerConfig()));
+  app.put("/api/config", exigirLogin, (req, res) => res.json(armazem.guardarConfig(req.body || {})));
+  app.get("/api/chamadas", exigirLogin, (req, res) => res.json(armazem.listarChamadas()));
+
+  app.post("/api/sugerir", exigirLogin, async (req, res) => {
+    const mensagem = String(req.body?.mensagem || "").trim().slice(0, 8000);
+    if (!mensagem) return res.status(400).json({ erro: "Cola a mensagem que recebeste." });
+    try {
+      const r = await ia.sugerirResposta(armazem.lerConfig(), {
+        mensagem,
+        plataforma: String(req.body?.plataforma || "").slice(0, 50),
+        contexto: String(req.body?.contexto || "").slice(0, 2000),
+      });
+      res.json(r);
+    } catch (erro) {
+      console.error("Erro ao sugerir resposta:", erro.message);
+      res.status(502).json({ erro: "A IA não respondeu. Tenta outra vez." });
+    }
+  });
+
+  app.get("/saude", (req, res) => res.json({ ok: true }));
+  return app;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const porta = Number(process.env.PORT) || 3000;
+  criarApp().listen(porta, () => console.log(`Assistente IA a correr em http://localhost:${porta}`));
+}
