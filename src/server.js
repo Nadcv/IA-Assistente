@@ -21,7 +21,17 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
 
   app.use("/voz", rotasVoz({ ia, armazem, notificador }));
   app.use(express.static(path.join(aqui, "..", "public")));
-  app.use("/api", express.json({ limit: "100kb" }));
+  app.use("/api", express.json({ limit: "8mb" })); // capturas de ecrã
+
+  // Imagem enviada pelo painel: { mime, dados (base64) }. Só JPEG/PNG/WebP até 5 MB.
+  const lerImagem = (img) => {
+    if (!img) return null;
+    const mime = String(img.mime || "");
+    const dados = String(img.dados || "");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(mime)) throw new Error("Formato de imagem não suportado.");
+    if (!/^[A-Za-z0-9+/=]+$/.test(dados) || dados.length > 7_000_000) throw new Error("Imagem inválida ou demasiado grande.");
+    return { mime, dados };
+  };
 
   // --- Autenticação simples do painel (uma palavra-passe, PAINEL_SENHA) ---
   const segredo = process.env.SEGREDO_SESSAO || crypto.randomBytes(32).toString("hex");
@@ -59,10 +69,17 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
 
   app.post("/api/sugerir", exigirLogin, async (req, res) => {
     const mensagem = String(req.body?.mensagem || "").trim().slice(0, 8000);
-    if (!mensagem) return res.status(400).json({ erro: "Cola a mensagem que recebeste." });
+    let imagem;
+    try {
+      imagem = lerImagem(req.body?.imagem);
+    } catch (erro) {
+      return res.status(400).json({ erro: erro.message });
+    }
+    if (!mensagem && !imagem) return res.status(400).json({ erro: "Cola a mensagem ou escolhe uma captura de ecrã." });
     try {
       const r = await ia.sugerirResposta(armazem.lerConfig(), {
         mensagem,
+        imagem,
         plataforma: String(req.body?.plataforma || "").slice(0, 50),
         contexto: String(req.body?.contexto || "").slice(0, 2000),
       });
@@ -71,6 +88,31 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
       console.error("Erro ao sugerir resposta:", erro.status || "", erro.message);
       const motivo = ia.explicarErro ? ia.explicarErro(erro) : "A IA não respondeu. Tenta outra vez.";
       res.status(502).json({ erro: motivo });
+    }
+  });
+
+  // Assistente pessoal (chat por texto ou voz) que também cria tarefas.
+  app.post("/api/conversar", exigirLogin, async (req, res) => {
+    let imagem;
+    try {
+      imagem = lerImagem(req.body?.imagem);
+    } catch (erro) {
+      return res.status(400).json({ erro: erro.message });
+    }
+    const bruto = Array.isArray(req.body?.historico) ? req.body.historico.slice(-20) : [];
+    const historico = bruto
+      .filter((m) => (m?.role === "user" || m?.role === "assistant") && typeof m.texto === "string" && m.texto.trim())
+      .map((m) => ({ role: m.role, texto: m.texto.slice(0, 4000) }));
+    while (historico.length && historico[0].role !== "user") historico.shift();
+    if (!historico.length || historico.at(-1).role !== "user") {
+      return res.status(400).json({ erro: "Escreve ou diz alguma coisa." });
+    }
+    try {
+      const r = await ia.conversar(armazem.lerConfig(), { historico, imagem });
+      res.json(r);
+    } catch (erro) {
+      console.error("Erro no assistente:", erro.status || "", erro.message);
+      res.status(502).json({ erro: ia.explicarErro ? ia.explicarErro(erro) : "A IA não respondeu. Tenta outra vez." });
     }
   });
 

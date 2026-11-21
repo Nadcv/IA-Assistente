@@ -19,7 +19,30 @@ const somarTokens = (contador, entrada, saida) => {
 
 // Cada "motor" recebe o mesmo pedido e devolve o JSON já lido:
 //   gerarJSON({ system, messages, schema, effort, timeout, contador })
-// messages: [{ role: "user" | "assistant", content: "texto" }]
+// messages: [{ role: "user" | "assistant", content }], em que content é um
+// texto ou uma lista de partes { texto } / { imagem: { mime, dados(base64) } }.
+const partes = (content) => (typeof content === "string" ? [{ texto: content }] : content);
+
+const paraClaude = (messages) =>
+  messages.map((m) => ({
+    role: m.role,
+    content:
+      typeof m.content === "string"
+        ? m.content
+        : partes(m.content).map((p) =>
+            p.imagem
+              ? { type: "image", source: { type: "base64", media_type: p.imagem.mime, data: p.imagem.dados } }
+              : { type: "text", text: p.texto },
+          ),
+  }));
+
+const paraGemini = (messages) =>
+  messages.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: partes(m.content).map((p) =>
+      p.imagem ? { inlineData: { mimeType: p.imagem.mime, data: p.imagem.dados } } : { text: p.texto },
+    ),
+  }));
 
 // Claude (Anthropic).
 // - effort "low" nas chamadas: ao telefone a rapidez importa mais.
@@ -38,7 +61,7 @@ export function motorClaude(cliente = new Anthropic(), modelo = process.env.CLAU
           fallbacks: "default",
           output_config: { effort, format: { type: "json_schema", schema } },
           system,
-          messages,
+          messages: paraClaude(messages),
         },
         { timeout, maxRetries: 1 },
       );
@@ -136,10 +159,7 @@ export function motorGemini(
     async _gerar({ system, messages, schema, timeout, contador }) {
       const resposta = await cliente.models.generateContent({
         model: motor.modelo,
-        contents: messages.map((m) => ({
-          role: m.role === "assistant" ? "model" : "user",
-          parts: [{ text: m.content }],
-        })),
+        contents: paraGemini(messages),
         config: {
           systemInstruction: system,
           responseMimeType: "application/json",
@@ -249,6 +269,29 @@ const SCHEMA_SUGESTOES = {
   additionalProperties: false,
 };
 
+const SCHEMA_CONVERSA = {
+  type: "object",
+  properties: {
+    resposta: { type: "string", description: "A tua resposta, em português de Portugal. Curta, salvo se pedirem detalhe." },
+    tarefas: {
+      type: "array",
+      description: "Tarefas ou lembretes NOVOS que a pessoa pediu nesta mensagem (vazio se não pediu nenhum).",
+      items: {
+        type: "object",
+        properties: {
+          titulo: { type: "string", description: "Curto, começa por verbo (ex.: Pagar a conta da luz)." },
+          quando: { type: "string", description: "Data e hora em ISO 8601 com fuso (ex.: 2026-11-22T09:00:00+00:00), ou vazio se não houver." },
+          notas: { type: "string", description: "Detalhes úteis, ou vazio." },
+        },
+        required: ["titulo", "quando", "notas"],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["resposta", "tarefas"],
+  additionalProperties: false,
+};
+
 export function saudacao(config, nomeContacto) {
   const ola = nomeContacto ? `Olá ${nomeContacto}!` : "Olá!";
   return `${ola} Fala o assistente virtual ${deDono(config)}, que não pode atender agora. Em que posso ajudar?`;
@@ -335,7 +378,12 @@ Nunca copies para o resumo números de cartão, IBAN, códigos, palavras-passe o
 
     // Para contas pessoais (Instagram, Facebook, WhatsApp...): a pessoa cola
     // ou partilha a mensagem recebida e recebe sugestões para copiar.
-    async sugerirResposta(config, { mensagem, plataforma, contexto }) {
+    async sugerirResposta(config, { mensagem, plataforma, contexto, imagem }) {
+      const pedidoTexto = `Plataforma: ${plataforma || "não indicada"}\n${contexto ? `Contexto extra: ${contexto}\n` : ""}${
+        imagem
+          ? "\nNa imagem está uma captura de ecrã da conversa. Lê-a, percebe quem é quem (as mensagens à direita costumam ser minhas) e responde à última mensagem da outra pessoa."
+          : ""
+      }${mensagem ? `\nMensagem recebida:\n"""\n${mensagem}\n"""` : ""}`;
       return motor.gerarJSON({
         system: `Ajudas ${dono(config)} a responder às mensagens que recebe nas redes sociais. Escreves na primeira pessoa, em nome dessa pessoa.
 Estilo: ${config.estiloMensagens}
@@ -347,10 +395,42 @@ Nunca prometas dinheiro, nem partilhes dados pessoais, códigos ou palavras-pass
         messages: [
           {
             role: "user",
-            content: `Plataforma: ${plataforma || "não indicada"}\n${contexto ? `Contexto extra: ${contexto}\n` : ""}\nMensagem recebida:\n"""\n${mensagem}\n"""`,
+            content: imagem ? [{ imagem }, { texto: pedidoTexto }] : pedidoTexto,
           },
         ],
         schema: SCHEMA_SUGESTOES,
+        effort: "medium",
+        timeout: 60_000,
+      });
+    },
+
+    // Assistente pessoal: conversa livre (texto ou voz) que também cria tarefas.
+    // historico: [{ role: "user" | "assistant", texto }], o último é da pessoa.
+    async conversar(config, { historico, agora = new Date(), imagem }) {
+      const dataHora = new Intl.DateTimeFormat("pt-PT", {
+        dateStyle: "full",
+        timeStyle: "short",
+        timeZone: "Europe/Lisbon",
+      }).format(agora);
+      const messages = historico.map((m, i) => ({
+        role: m.role,
+        content: imagem && i === historico.length - 1 ? [{ imagem }, { texto: m.texto }] : m.texto,
+      }));
+      return motor.gerarJSON({
+        system: `És o assistente pessoal ${deDono(config)}. Falas português de Portugal, de forma simpática e direta.
+Ajudas em tudo o que for útil no dia a dia: responder a perguntas, redigir mensagens e emails, planear o dia, explicar coisas, dar ideias.
+As tuas respostas podem ser lidas em voz alta: evita tabelas e formatação complicada; usa listas curtas só quando ajudam.
+
+Agora são ${dataHora} (hora de Lisboa, fuso Europe/Lisbon). ISO de agora: ${agora.toISOString()}.
+Quando a pessoa pedir para lembrar, anotar ou marcar algo, cria a tarefa em "tarefas" (com "quando" em ISO 8601 se houver data ou hora; "amanhã de manhã" = 09:00) e confirma na resposta de forma curta.
+Não inventes factos: se não souberes algo (por exemplo notícias de hoje ou o tempo), diz que não tens essa informação.
+
+Informação sobre ${dono(config)} que podes usar:
+"""
+${config.instrucoes}
+"""`,
+        messages,
+        schema: SCHEMA_CONVERSA,
         effort: "medium",
         timeout: 60_000,
       });

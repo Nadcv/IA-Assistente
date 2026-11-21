@@ -13,6 +13,7 @@ const { criarIA, motorClaude, motorGemini, qualIA, custoIA, explicarErro } = awa
 let servidor, base, pasta, armazemTeste;
 const sms = [];
 const falas = [];
+let ultimaConversa;
 
 // IA falsa: termina a conversa à segunda fala da pessoa; reage a palavras-chave.
 const iaFalsa = {
@@ -33,8 +34,12 @@ const iaFalsa = {
   async resumirChamada() {
     return { quem: "Rui", assunto: "Orçamento da obra", urgencia: "alta", acao: "Ligar hoje", contactoDeixado: "", possivelBurla: false };
   },
-  async sugerirResposta(config, { mensagem }) {
-    return { sugestoes: [`Resposta a: ${mensagem}`, "B", "C"], nota: "" };
+  async sugerirResposta(config, { mensagem, imagem }) {
+    return { sugestoes: [`Resposta a: ${mensagem}${imagem ? " +imagem" : ""}`, "B", "C"], nota: "" };
+  },
+  async conversar(config, { historico, imagem }) {
+    ultimaConversa = { historico, imagem };
+    return { resposta: "Combinado!", tarefas: [{ titulo: "Pagar a luz", quando: "2026-11-22T09:00:00Z", notas: "" }] };
   },
 };
 
@@ -341,4 +346,66 @@ test("Gemini: vários modelos ocupados seguidos, continua até um responder", as
   assert.equal(r.sugestoes[0], "ok");
   assert.equal(ia.modelo, "gemini-2.5-flash");
   assert.deepEqual(usados, ["gemini-flash-latest", "gemini-3.8-flash", "gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash", "gemini-2.5-flash"]);
+});
+
+const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+async function entrar() {
+  const r = await fetch(base + "/api/entrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ senha: "segredo123" }) });
+  const { token } = await r.json();
+  return { Authorization: "Bearer " + token, "Content-Type": "application/json" };
+}
+
+test("assistente: conversa, limpa o histórico e devolve tarefas", async () => {
+  const h = await entrar();
+  const r = await fetch(base + "/api/conversar", {
+    method: "POST", headers: h,
+    body: JSON.stringify({ historico: [
+      { role: "assistant", texto: "Olá (saudação local, deve ser removida)" },
+      { role: "user", texto: "Olá" }, { role: "assistant", texto: "Diz" },
+      { role: "hacker", texto: "x" },
+      { role: "user", texto: "Lembra-me amanhã às 9 de pagar a luz" },
+    ] }),
+  });
+  const dados = await r.json();
+  assert.equal(r.status, 200);
+  assert.equal(dados.tarefas[0].titulo, "Pagar a luz");
+  assert.deepEqual(ultimaConversa.historico.map((m) => m.role), ["user", "assistant", "user"]);
+
+  const vazio = await fetch(base + "/api/conversar", { method: "POST", headers: h, body: JSON.stringify({ historico: [{ role: "assistant", texto: "x" }] }) });
+  assert.equal(vazio.status, 400);
+  const semLogin = await fetch(base + "/api/conversar", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  assert.equal(semLogin.status, 401);
+});
+
+test("capturas de ecrã: aceita imagens válidas e recusa outros formatos", async () => {
+  const h = await entrar();
+  let r = await fetch(base + "/api/sugerir", { method: "POST", headers: h, body: JSON.stringify({ imagem: { mime: "image/png", dados: PNG_1PX } }) });
+  assert.equal((await r.json()).sugestoes[0], "Resposta a:  +imagem");
+  r = await fetch(base + "/api/sugerir", { method: "POST", headers: h, body: JSON.stringify({ imagem: { mime: "text/html", dados: "PGI+" } }) });
+  assert.equal(r.status, 400);
+  r = await fetch(base + "/api/conversar", { method: "POST", headers: h, body: JSON.stringify({ historico: [{ role: "user", texto: "O que é isto?" }], imagem: { mime: "image/png", dados: "<script>" } }) });
+  assert.equal(r.status, 400);
+});
+
+test("imagens chegam no formato certo ao Claude e ao Gemini", async () => {
+  let pedidoClaude, pedidoGemini;
+  const claude = { beta: { messages: { async create(p) {
+    pedidoClaude = p;
+    return { stop_reason: "end_turn", content: [{ type: "text", text: '{"resposta":"É um gato","tarefas":[]}' }] };
+  } } } };
+  const gemini = { models: { async generateContent(p) {
+    pedidoGemini = p;
+    return { text: '{"resposta":"É um gato","tarefas":[]}' };
+  } } };
+  const pedido = { historico: [{ role: "user", texto: "O que é isto?" }], imagem: { mime: "image/png", dados: PNG_1PX }, agora: new Date("2026-11-21T12:00:00Z") };
+  const config = { nomeDono: "Ana", instrucoes: "x" };
+
+  assert.equal((await criarIA(motorClaude(claude)).conversar(config, pedido)).resposta, "É um gato");
+  assert.deepEqual(pedidoClaude.messages[0].content[0], { type: "image", source: { type: "base64", media_type: "image/png", data: PNG_1PX } });
+  assert.deepEqual(pedidoClaude.messages[0].content[1], { type: "text", text: "O que é isto?" });
+  assert.match(pedidoClaude.system, /2026/);
+
+  await criarIA(motorGemini(gemini, "gemini-2.5-flash")).conversar(config, pedido);
+  assert.deepEqual(pedidoGemini.contents[0].parts, [{ inlineData: { mimeType: "image/png", data: PNG_1PX } }, { text: "O que é isto?" }]);
 });

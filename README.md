@@ -2,12 +2,19 @@
 
 Assistente pessoal com inteligência artificial (Gemini grátis ou Claude):
 
+- **🤖 Assistente por voz ou texto.** Perguntas, pedes para escrever uma
+  mensagem ou um email, planear o dia... Carregas em 🎤 para falar e ele pode
+  ler as respostas em voz alta. Também percebe imagens (📷).
+- **✅ Tarefas e lembretes.** Dizes "lembra-me amanhã às 9 de pagar a luz" e
+  a tarefa é criada. O botão 📅 põe-na no calendário do telemóvel, com alerta.
+  As tarefas e a conversa ficam guardadas no próprio telemóvel.
 - **📞 Atende chamadas quando não podes.** Quem te liga e não é atendido é
   reencaminhado para a IA, que conversa por voz em português de Portugal,
   percebe quem é e o que quer, e anota o recado. No fim recebes um **SMS com o
   resumo** (quem, assunto, urgência, o que fazer).
 - **💬 Ajuda a responder mensagens** do Instagram, Facebook, WhatsApp, etc.
-  Usas **Partilhar → Assistente** no telemóvel (ou colas a mensagem) e recebes
+  Tiras uma **captura de ecrã** da conversa (ou colas o texto, ou usas
+  **Partilhar → Assistente** no Android) e recebes
   3 respostas no teu estilo, prontas a copiar. Também avisa se a mensagem
   parecer burla.
 - **⚙️ Painel web** (instalável no telemóvel como app): histórico das chamadas

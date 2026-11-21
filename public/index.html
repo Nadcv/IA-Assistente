@@ -13,8 +13,28 @@
   body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--txt); }
   header { padding:16px; display:flex; align-items:center; gap:10px; }
   header h1 { font-size:20px; margin:0; flex:1; }
-  nav { display:flex; gap:6px; padding:0 16px; }
-  nav button { flex:1; }
+  nav { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; padding:0 12px; }
+  nav button { padding:8px 2px; font-size:12px; display:flex; flex-direction:column; align-items:center; gap:2px; }
+  nav button span { font-size:20px; }
+  .chat { display:flex; flex-direction:column; gap:8px; min-height:200px; max-height:55vh; overflow-y:auto; margin-bottom:10px; }
+  .bolha { padding:10px 12px; border-radius:14px; max-width:85%; white-space:pre-wrap; line-height:1.4; }
+  .eu { align-self:flex-end; background:var(--ac); color:#0f172a; border-bottom-right-radius:4px; }
+  .ela { align-self:flex-start; background:#0b1220; border:1px solid #334155; border-bottom-left-radius:4px; }
+  .ela.erro { color:var(--warn); }
+  .criada { align-self:flex-start; font-size:13px; color:var(--ok); }
+  .barra { display:flex; gap:6px; align-items:flex-end; }
+  .barra textarea { min-height:44px; height:44px; flex:1; }
+  .barra button { height:44px; }
+  #microfone.aouvir { background:var(--err); }
+  .previa { display:flex; align-items:center; gap:8px; margin:8px 0; }
+  .previa img { max-height:70px; border-radius:8px; }
+  .tarefa { display:flex; gap:10px; align-items:flex-start; padding:10px 0; border-bottom:1px solid #334155; }
+  .tarefa:last-child { border-bottom:0; }
+  .tarefa input[type=checkbox] { width:auto; transform:scale(1.4); margin-top:4px; }
+  .tarefa .info { flex:1; }
+  .tarefa.feita .tit { text-decoration:line-through; color:var(--mut); }
+  .atrasada { color:var(--err); }
+  .tarefa button { padding:6px 10px; }
   main { padding:16px; max-width:720px; margin:0 auto; }
   .card { background:var(--card); border-radius:14px; padding:16px; margin-bottom:14px; }
   label { display:block; font-size:14px; color:var(--mut); margin:10px 0 4px; }
@@ -56,20 +76,56 @@
 
 <div id="app" class="oculto">
   <nav>
-    <button data-sec="mensagens" class="ativo">💬 Mensagens</button>
-    <button data-sec="chamadas">📞 Chamadas</button>
-    <button data-sec="definicoes">⚙️ Definições</button>
+    <button data-sec="assistente" class="ativo"><span>🤖</span>Assistente</button>
+    <button data-sec="tarefas"><span>✅</span>Tarefas</button>
+    <button data-sec="mensagens"><span>💬</span>Mensagens</button>
+    <button data-sec="chamadas"><span>📞</span>Chamadas</button>
+    <button data-sec="definicoes"><span>⚙️</span>Definições</button>
   </nav>
   <main>
-    <section id="mensagens">
+    <section id="assistente">
       <div class="card">
-        <p class="mut">Recebeste uma mensagem no Instagram, Facebook, WhatsApp…? Cola-a aqui (ou usa <b>Partilhar → Assistente</b> no telemóvel) e escolhe uma resposta para copiar.</p>
+        <div id="chat" class="chat"></div>
+        <div id="previaChat" class="previa oculto"><img alt=""><button id="tirarImgChat">✕</button></div>
+        <div class="barra">
+          <button id="microfone" title="Falar">🎤</button>
+          <button id="anexarChat" title="Imagem">📷</button>
+          <textarea id="pergunta" placeholder="Pergunta ou pede alguma coisa… (ex.: lembra-me amanhã às 9 de pagar a luz)"></textarea>
+          <button id="enviar" class="prim">➤</button>
+        </div>
+        <input type="file" id="ficheiroChat" accept="image/*" class="oculto">
+        <div class="linha" style="margin-top:10px; justify-content:space-between">
+          <label class="interruptor" style="margin:0; font-size:14px"><input type="checkbox" id="lerVoz"> 🔊 Ler respostas</label>
+          <button id="novaConversa">🧹 Nova conversa</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="tarefas" class="oculto">
+      <div class="card">
+        <label for="novaTarefa">Nova tarefa</label>
+        <input id="novaTarefa" placeholder="Ex.: Ligar ao canalizador">
+        <label for="quandoTarefa">Quando (opcional)</label>
+        <input id="quandoTarefa" type="datetime-local">
+        <p></p>
+        <button id="juntarTarefa" class="prim">➕ Adicionar</button>
+        <p class="mut">Dica: no separador Assistente basta dizer "lembra-me de…". Usa 📅 para pôr a tarefa no calendário do telemóvel e receber o alerta.</p>
+      </div>
+      <div class="card" id="listaTarefas"></div>
+    </section>
+
+    <section id="mensagens" class="oculto">
+      <div class="card">
+        <p class="mut">Recebeste uma mensagem no Instagram, Facebook, WhatsApp…? Cola o texto ou tira uma <b>captura de ecrã</b> da conversa e escolhe uma resposta para copiar.</p>
         <label for="plataforma">Plataforma</label>
         <select id="plataforma">
           <option>Instagram</option><option>Facebook / Messenger</option><option>WhatsApp</option><option>SMS</option><option>Email</option><option>Outra</option>
         </select>
         <label for="mensagem">Mensagem recebida</label>
         <textarea id="mensagem" placeholder="Ex.: Olá! Ainda tens a bicicleta à venda?"></textarea>
+        <p><button id="anexarMsg">📷 Usar captura de ecrã da conversa</button></p>
+        <input type="file" id="ficheiroMsg" accept="image/*" class="oculto">
+        <div id="previaMsg" class="previa oculto"><img alt=""><button id="tirarImgMsg">✕</button></div>
         <label for="contexto">Contexto (opcional)</label>
         <input id="contexto" placeholder="Ex.: já vendi a bicicleta; quero recusar com simpatia">
         <p></p>
@@ -165,6 +221,7 @@ $("#sugerir").onclick = async () => {
   try {
     const r = await api("/api/sugerir", { method: "POST", body: JSON.stringify({
       mensagem: $("#mensagem").value, plataforma: $("#plataforma").value, contexto: $("#contexto").value,
+      imagem: imagemMsg.valor,
     }) });
     res.replaceChildren();
     if (r.nota) res.append(el("p", { className: "nota", textContent: "⚠️ " + r.nota }));
@@ -178,10 +235,189 @@ $("#sugerir").onclick = async () => {
   } finally { $("#sugerir").disabled = false; }
 };
 
+// --- Imagens: reduz no telemóvel (também converte HEIC do iPhone para JPEG) ---
+function reduzirImagem(ficheiro, max = 1600) {
+  return new Promise((ok, falha) => {
+    const img = new Image();
+    img.onload = () => {
+      const esc = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * esc); c.height = Math.round(img.height * esc);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      const url = c.toDataURL("image/jpeg", 0.85);
+      ok({ mime: "image/jpeg", dados: url.split(",")[1], url });
+    };
+    img.onerror = () => falha(new Error("Não consegui abrir a imagem."));
+    img.src = URL.createObjectURL(ficheiro);
+  });
+}
+// Liga um botão 📷 a um <input type=file> e a uma pré-visualização.
+function seletorImagem(botao, entrada, caixaPrevia, tirar) {
+  const input = $(entrada), previa = $(caixaPrevia);
+  const estado = {
+    valor: null,
+    limpar() { estado.valor = null; previa.classList.add("oculto"); input.value = ""; },
+  };
+  $(botao).onclick = () => input.click();
+  input.onchange = async () => {
+    const f = input.files[0];
+    if (!f) return;
+    try {
+      const { mime, dados, url } = await reduzirImagem(f);
+      estado.valor = { mime, dados };
+      previa.querySelector("img").src = url;
+      previa.classList.remove("oculto");
+    } catch (err) { alert(err.message); }
+  };
+  $(tirar).onclick = () => estado.limpar();
+  return estado;
+}
+const imagemMsg = seletorImagem("#anexarMsg", "#ficheiroMsg", "#previaMsg", "#tirarImgMsg");
+const imagemChat = seletorImagem("#anexarChat", "#ficheiroChat", "#previaChat", "#tirarImgChat");
+
+// --- Assistente (chat por texto ou voz) ---
+const guardado = (k, padrao) => { try { return JSON.parse(localStorage.getItem(k)) ?? padrao; } catch { return padrao; } };
+const guardar = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+let conversa = guardado("conversa", []);
+$("#lerVoz").checked = guardado("lerVoz", false);
+$("#lerVoz").onchange = () => guardar("lerVoz", $("#lerVoz").checked);
+
+function mostrarConversa() {
+  const chat = $("#chat");
+  if (!conversa.length) {
+    chat.replaceChildren(el("div", { className: "bolha ela", textContent: "Olá! Sou o teu assistente. Pergunta-me o que quiseres, pede-me para escrever uma mensagem ou diz \"lembra-me de…\" para criar uma tarefa. Podes carregar em 🎤 para falar." }));
+  } else {
+    chat.replaceChildren(...conversa.map((m) => el("div", { className: "bolha " + (m.role === "user" ? "eu" : "ela"), textContent: m.texto })));
+  }
+  chat.scrollTop = chat.scrollHeight;
+}
+function falar(texto) {
+  if (!$("#lerVoz").checked || !("speechSynthesis" in window)) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(texto.replace(/[*#_`]/g, ""));
+  u.lang = "pt-PT";
+  const voz = speechSynthesis.getVoices().find((v) => v.lang === "pt-PT") || speechSynthesis.getVoices().find((v) => v.lang.startsWith("pt"));
+  if (voz) u.voice = voz;
+  speechSynthesis.speak(u);
+}
+async function enviarPergunta() {
+  const texto = $("#pergunta").value.trim();
+  const imagem = imagemChat.valor;
+  if (!texto && !imagem) return;
+  conversa.push({ role: "user", texto: texto || "(imagem)" });
+  $("#pergunta").value = "";
+  imagemChat.limpar();
+  mostrarConversa();
+  const aPensar = el("div", { className: "bolha ela", textContent: "…" });
+  $("#chat").append(aPensar); $("#chat").scrollTop = $("#chat").scrollHeight;
+  $("#enviar").disabled = true;
+  try {
+    const r = await api("/api/conversar", { method: "POST", body: JSON.stringify({ historico: conversa.slice(-20), imagem }) });
+    conversa.push({ role: "assistant", texto: r.resposta });
+    conversa = conversa.slice(-40);
+    guardar("conversa", conversa);
+    mostrarConversa();
+    for (const t of r.tarefas || []) {
+      juntarTarefa(t.titulo, t.quando, t.notas);
+      $("#chat").append(el("div", { className: "criada", textContent: "✅ Tarefa criada: " + t.titulo + (t.quando ? " — " + dataBonita(t.quando) : "") }));
+    }
+    $("#chat").scrollTop = $("#chat").scrollHeight;
+    falar(r.resposta);
+  } catch (err) {
+    conversa.pop(); // a pergunta não teve resposta; deixa voltar a tentar
+    $("#pergunta").value = texto;
+    aPensar.textContent = err.message; aPensar.classList.add("erro");
+  } finally { $("#enviar").disabled = false; }
+}
+$("#enviar").onclick = enviarPergunta;
+$("#pergunta").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviarPergunta(); } });
+$("#novaConversa").onclick = () => { conversa = []; guardar("conversa", conversa); mostrarConversa(); };
+
+// Microfone: reconhecimento de voz do próprio telemóvel/browser (grátis).
+const Reconhecimento = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!Reconhecimento) $("#microfone").classList.add("oculto");
+else {
+  let rec = null;
+  $("#microfone").onclick = () => {
+    if (rec) { rec.stop(); return; }
+    rec = new Reconhecimento();
+    rec.lang = "pt-PT"; rec.interimResults = true;
+    const antes = $("#pergunta").value;
+    rec.onresult = (e) => { $("#pergunta").value = (antes ? antes + " " : "") + [...e.results].map((r) => r[0].transcript).join(""); };
+    rec.onend = () => { rec = null; $("#microfone").classList.remove("aouvir"); if ($("#pergunta").value.trim()) enviarPergunta(); };
+    rec.onerror = (e) => { if (e.error === "not-allowed") alert("Dá permissão ao microfone nas definições do browser."); };
+    $("#microfone").classList.add("aouvir");
+    rec.start();
+  };
+}
+mostrarConversa();
+
+// --- Tarefas (guardadas neste telemóvel) ---
+let tarefas = guardado("tarefas", []);
+function dataBonita(iso) {
+  const d = new Date(iso);
+  return isNaN(d) ? "" : d.toLocaleString("pt-PT", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+function juntarTarefa(titulo, quando, notas) {
+  if (!titulo) return;
+  const d = quando ? new Date(quando) : null;
+  tarefas.push({ id: Date.now() + Math.random(), titulo, quando: d && !isNaN(d) ? d.toISOString() : "", notas: notas || "", feita: false });
+  guardar("tarefas", tarefas); mostrarTarefas();
+}
+function ficheiroICS(t) {
+  const f = (d) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const inicio = new Date(t.quando);
+  const fim = new Date(inicio.getTime() + 30 * 60000);
+  const esc = (x) => String(x).replace(/[\\;,]/g, (c) => "\\" + c).replace(/\n/g, "\\n");
+  return ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Assistente IA//PT", "BEGIN:VEVENT",
+    "UID:" + t.id + "@assistente-ia", "DTSTAMP:" + f(new Date()), "DTSTART:" + f(inicio), "DTEND:" + f(fim),
+    "SUMMARY:" + esc(t.titulo), t.notas ? "DESCRIPTION:" + esc(t.notas) : "",
+    "BEGIN:VALARM", "ACTION:DISPLAY", "DESCRIPTION:" + esc(t.titulo), "TRIGGER:-PT0M", "END:VALARM",
+    "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
+}
+function mostrarTarefas() {
+  const lista = $("#listaTarefas");
+  if (!tarefas.length) { lista.replaceChildren(el("p", { className: "mut", textContent: "Sem tarefas. 🎉" })); return; }
+  const ordem = [...tarefas].sort((a, b) => (a.feita - b.feita) || ((a.quando || "9") < (b.quando || "9") ? -1 : 1));
+  lista.replaceChildren(...ordem.map((t) => {
+    const caixa = el("input", { type: "checkbox", checked: t.feita });
+    caixa.onchange = () => { t.feita = caixa.checked; guardar("tarefas", tarefas); mostrarTarefas(); };
+    const apagar = el("button", { textContent: "🗑" });
+    apagar.onclick = () => { tarefas = tarefas.filter((x) => x.id !== t.id); guardar("tarefas", tarefas); mostrarTarefas(); };
+    const botoes = [apagar];
+    if (t.quando && !t.feita) {
+      const cal = el("button", { textContent: "📅" });
+      cal.onclick = () => {
+        const url = URL.createObjectURL(new Blob([ficheiroICS(t)], { type: "text/calendar" }));
+        const a = el("a", { href: url, download: "tarefa.ics" }); document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      };
+      botoes.unshift(cal);
+    }
+    const atrasada = t.quando && !t.feita && new Date(t.quando) < new Date();
+    return el("div", { className: "tarefa" + (t.feita ? " feita" : "") }, caixa,
+      el("div", { className: "info" },
+        el("div", { className: "tit", textContent: t.titulo }),
+        t.quando ? el("div", { className: "mut" + (atrasada ? " atrasada" : ""), textContent: (atrasada ? "⏰ " : "🕘 ") + dataBonita(t.quando) }) : "",
+        t.notas ? el("div", { className: "mut", textContent: t.notas }) : ""),
+      ...botoes);
+  }));
+}
+$("#juntarTarefa").onclick = () => {
+  const v = $("#quandoTarefa").value;
+  juntarTarefa($("#novaTarefa").value.trim(), v ? new Date(v).toISOString() : "", "");
+  $("#novaTarefa").value = ""; $("#quandoTarefa").value = "";
+};
+mostrarTarefas();
+
 // Texto que chegou pelo botão "Partilhar" do telemóvel.
 const qs = new URLSearchParams(location.search);
 const partilhado = [qs.get("titulo"), qs.get("texto"), qs.get("link")].filter(Boolean).join("\n");
-if (partilhado) { $("#mensagem").value = partilhado; history.replaceState(null, "", "/"); }
+if (partilhado) {
+  $("#mensagem").value = partilhado; history.replaceState(null, "", "/");
+  document.querySelector('nav button[data-sec="mensagens"]').click();
+}
 
 // --- Chamadas ---
 async function carregarChamadas() {
