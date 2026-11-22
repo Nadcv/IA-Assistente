@@ -108,6 +108,19 @@ Escolhe com a variável `IA`:
 - **`IA=claude`**: pago, mais fiável a detetar burlas e a cumprir as regras de
   segurança. Para gastar menos, junta `CLAUDE_MODEL=claude-haiku-5-5`.
 
+### Base de dados (Neon Postgres)
+
+Com a variável `DATABASE_URL` (Postgres do Neon), as definições, as tarefas e
+as chamadas ficam guardadas no Postgres e **sobrevivem a reinícios** do Render.
+Sem ela, a app usa ficheiros na pasta `data/`, que se apagam no plano grátis.
+
+- `neon deploy` cria a base de dados e escreve a `DATABASE_URL` em `.env.local`.
+- No Render: **Environment → DATABASE_URL** = o valor de `.env.local` (a
+  ligação com `-pooler` no nome do host).
+- As tabelas (`dados` e `chamadas`) são criadas sozinhas no arranque.
+- Teste de integração (usa tabelas temporárias e apaga-as no fim):
+  `node --env-file=.env.local --test test/neon.test.js`
+
 ### 2. Instalar o servidor
 
 ```bash

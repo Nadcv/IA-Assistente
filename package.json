@@ -9,11 +9,15 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test"
+    "test": "node --test",
+    "build": "node --check src/server.js && node --check src/armazem-neon.js && node --check src/ia.js && node --check src/voz.js && node --check src/armazem.js && node --check src/notificar.js && node --check src/privacidade.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.12.0",
     "@google/genai": "^3.6.1",
+    "@neon/config": "^1.14.6",
+    "@neon/env": "^2.1.9",
+    "@neondatabase/serverless": "^1.2.1",
     "express": "^5.3.0",
     "twilio": "^6.3.1"
   }

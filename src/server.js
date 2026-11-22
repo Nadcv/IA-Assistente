@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { criarArmazem } from "./armazem.js";
+import { criarArmazemNeon } from "./armazem-neon.js";
 import { criarIA } from "./ia.js";
 import { criarNotificador } from "./notificar.js";
 import { rotasVoz } from "./voz.js";
@@ -214,7 +215,25 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
   return app;
 }
 
+// Com DATABASE_URL (Neon) os dados ficam no Postgres; sem ela, em ficheiros.
+export async function criarArmazemPorOmissao() {
+  if (process.env.DATABASE_URL) {
+    const armazem = await criarArmazemNeon(process.env.DATABASE_URL);
+    console.log("Dados guardados no Neon (Postgres).");
+    return armazem;
+  }
+  console.log("Sem DATABASE_URL: dados guardados em ficheiros (pasta data/).");
+  return criarArmazem();
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const porta = Number(process.env.PORT) || 3000;
-  criarApp().listen(porta, () => console.log(`Assistente IA a correr em http://localhost:${porta}`));
+  const armazem = await criarArmazemPorOmissao();
+  const servidor = criarApp({ armazem }).listen(porta, () => console.log(`Assistente IA a correr em http://localhost:${porta}`));
+  // Ao desligar (ex.: Render a reiniciar), acaba de gravar o que falta no Neon.
+  process.on("SIGTERM", async () => {
+    servidor.close();
+    await armazem.pendentes?.();
+    process.exit(0);
+  });
 }
