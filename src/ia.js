@@ -23,6 +23,10 @@ const somarTokens = (contador, entrada, saida) => {
 // texto ou uma lista de partes { texto } / { imagem: { mime, dados(base64) } }.
 const partes = (content) => (typeof content === "string" ? [{ texto: content }] : content);
 
+// Áudio, vídeo, PDF e outros ficheiros só existem no Gemini (Files API).
+const erroFicheiroClaude = () =>
+  Object.assign(new Error("Ficheiros de áudio, vídeo e documentos só funcionam com o Gemini (IA=gemini)."), { status: 400, amigavel: true });
+
 const paraClaude = (messages) =>
   messages.map((m) => ({
     role: m.role,
@@ -30,9 +34,11 @@ const paraClaude = (messages) =>
       typeof m.content === "string"
         ? m.content
         : partes(m.content).map((p) =>
-            p.imagem
-              ? { type: "image", source: { type: "base64", media_type: p.imagem.mime, data: p.imagem.dados } }
-              : { type: "text", text: p.texto },
+            p.ficheiro
+              ? (() => { throw erroFicheiroClaude(); })()
+              : p.imagem
+                ? { type: "image", source: { type: "base64", media_type: p.imagem.mime, data: p.imagem.dados } }
+                : { type: "text", text: p.texto },
           ),
   }));
 
@@ -40,7 +46,11 @@ const paraGemini = (messages) =>
   messages.map((m) => ({
     role: m.role === "assistant" ? "model" : "user",
     parts: partes(m.content).map((p) =>
-      p.imagem ? { inlineData: { mimeType: p.imagem.mime, data: p.imagem.dados } } : { text: p.texto },
+      p.ficheiro
+        ? { fileData: { fileUri: p.ficheiro.uri, mimeType: p.ficheiro.mime } }
+        : p.imagem
+          ? { inlineData: { mimeType: p.imagem.mime, data: p.imagem.dados } }
+          : { text: p.texto },
     ),
   }));
 
@@ -78,6 +88,28 @@ export function motorClaude(cliente = new Anthropic(), modelo = process.env.CLAU
         .map((b) => b.text)
         .join("");
       return JSON.parse(texto);
+    },
+    // Pesquisa na internet (ferramenta web_search do Claude). Devolve texto e fontes.
+    async pesquisar({ system, messages, timeout = 60_000 }) {
+      const resposta = await cliente.beta.messages.create(
+        {
+          model: modelo,
+          max_tokens: 4000,
+          betas: ["server-side-fallback-2026-07-01"],
+          fallbacks: "default",
+          output_config: { effort: "low" },
+          tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 3 }],
+          system,
+          messages: paraClaude(messages),
+        },
+        { timeout, maxRetries: 1 },
+      );
+      if (resposta.stop_reason === "refusal") throw new Error("O modelo recusou o pedido");
+      const textos = resposta.content.filter((b) => b.type === "text");
+      const fontes = [];
+      for (const b of textos)
+        for (const c of b.citations || []) if (c.url && !fontes.some((f) => f.url === c.url)) fontes.push({ url: c.url, titulo: c.title || c.url });
+      return { texto: textos.map((b) => b.text).join("").trim(), fontes: fontes.slice(0, 5) };
     },
   };
 }
@@ -143,17 +175,60 @@ export function motorGemini(
   const motor = {
     nome: "gemini",
     modelo,
+    async gerarJSON(pedido) {
+      return this._comRotacao(pedido.timeout, (resta) => this._gerar({ ...pedido, timeout: resta }));
+    },
+    // Pesquisa na internet com a Pesquisa Google do Gemini. Devolve texto e fontes.
+    async pesquisar({ system, messages, timeout = 60_000 }) {
+      return this._comRotacao(timeout, async (resta) => {
+        const resposta = await cliente.models.generateContent({
+          model: motor.modelo,
+          contents: paraGemini(messages),
+          config: {
+            systemInstruction: system,
+            tools: [{ googleSearch: {} }],
+            maxOutputTokens: 4000,
+            ...(semPensamento ? {} : { thinkingConfig: pensamentoGemini(motor.modelo, "low") }),
+            abortSignal: AbortSignal.timeout(resta),
+          },
+        });
+        const texto = (resposta.text || "").trim();
+        if (!texto) throw new Error("O Gemini não devolveu resposta à pesquisa");
+        const fontes = [];
+        for (const c of resposta.candidates?.[0]?.groundingMetadata?.groundingChunks || []) {
+          if (c.web?.uri && !fontes.some((f) => f.url === c.web.uri)) fontes.push({ url: c.web.uri, titulo: c.web.title || c.web.uri });
+        }
+        return { texto, fontes: fontes.slice(0, 5) };
+      });
+    },
+    // Envia um ficheiro (áudio, vídeo, PDF, foto...) para a Files API do Gemini.
+    // Os ficheiros ficam lá 48 h e depois são apagados pela Google.
+    async carregarFicheiro(dados, mime, nome = "ficheiro") {
+      let f = await cliente.files.upload({
+        file: new Blob([dados], { type: mime }),
+        config: { mimeType: mime, displayName: nome.slice(0, 100) },
+      });
+      // Vídeos (e alguns áudios) precisam de ser processados antes de usar.
+      const limite = Date.now() + 90_000;
+      while (f.state === "PROCESSING" && Date.now() < limite) {
+        await esperar(2000);
+        f = await cliente.files.get({ name: f.name });
+      }
+      if (f.state === "FAILED") throw new Error("O Gemini não conseguiu processar o ficheiro");
+      if (f.state === "PROCESSING") throw new Error("O ficheiro ainda está a ser processado. Tenta daqui a um minuto.");
+      return { uri: f.uri, mime: f.mimeType || mime, nome };
+    },
     // Tenta o modelo atual; se estiver ocupado repete uma vez, e depois vai
     // mudando para outros Flash disponíveis até um responder (dentro do tempo).
-    async gerarJSON(pedido) {
+    async _comRotacao(timeout, executar) {
       const inicio = Date.now();
       let ultimo;
       let repetiu = false;
       for (let tentativa = 0; tentativa < 6; tentativa++) {
-        const resta = pedido.timeout - (Date.now() - inicio);
+        const resta = timeout - (Date.now() - inicio);
         if (resta < 1500) break;
         try {
-          return await this._gerar({ ...pedido, timeout: resta });
+          return await executar(resta);
         } catch (erro) {
           ultimo = erro;
           if (!semPensamento && erro?.status === 400 && /think/i.test(String(erro?.message))) {
@@ -366,8 +441,22 @@ const SCHEMA_CONVERSA = {
         additionalProperties: false,
       },
     },
+    lembrar: {
+      type: "array",
+      items: { type: "string" },
+      description: "Factos NOVOS e duradouros sobre a pessoa para guardar na memória (gostos, pessoas, rotinas, dados práticos), numa frase curta cada. Vazio se não houver.",
+    },
+    esquecer: {
+      type: "array",
+      items: { type: "string" },
+      description: "IDs das memórias que a pessoa pediu para esquecer ou que deixaram de ser verdade. Vazio se nenhuma.",
+    },
+    pesquisar: {
+      type: "string",
+      description: "Se a resposta precisa de informação atual da internet (notícias, horários, preços, resultados, moradas, tempo previsto...), a pesquisa a fazer, em poucas palavras. Senão, vazio.",
+    },
   },
-  required: ["resposta", "tarefas"],
+  required: ["resposta", "tarefas", "lembrar", "esquecer", "pesquisar"],
   additionalProperties: false,
 };
 
@@ -487,35 +576,64 @@ Nunca prometas dinheiro, nem partilhes dados pessoais, códigos ou palavras-pass
 
     // Assistente pessoal: conversa livre (texto ou voz) que também cria tarefas.
     // historico: [{ role: "user" | "assistant", texto }], o último é da pessoa.
-    async conversar(config, { historico, agora = new Date(), imagem }) {
+    // Assistente pessoal: conversa livre (texto ou voz) que também cria tarefas,
+    // guarda memórias e pesquisa na internet quando precisa.
+    // historico: [{ role: "user" | "assistant", texto }], o último é da pessoa.
+    // anexo (opcional) no último pedido: { imagem } ou { ficheiro: { uri, mime, nome } }.
+    async conversar(config, { historico, agora = new Date(), imagem, ficheiro, memorias = [] }) {
       const dataHora = new Intl.DateTimeFormat("pt-PT", {
         dateStyle: "full",
         timeStyle: "short",
         timeZone: "Europe/Lisbon",
       }).format(agora);
+      const anexo = imagem ? { imagem } : ficheiro ? { ficheiro } : null;
       const messages = historico.map((m, i) => ({
         role: m.role,
-        content: imagem && i === historico.length - 1 ? [{ imagem }, { texto: m.texto }] : m.texto,
+        content: anexo && i === historico.length - 1 ? [anexo, { texto: m.texto }] : m.texto,
       }));
-      return motor.gerarJSON({
-        system: `És ${config.nomeAssistente || "Íris"}, o assistente pessoal ${deDono(config)}. Falas português de Portugal, de forma simpática, confiante e direta, com um toque de humor discreto.
+      const listaMemorias = memorias.length
+        ? memorias.map((m) => `- [${m.id}] ${m.texto}`).join("\n")
+        : "(ainda nada)";
+      const system = `És ${config.nomeAssistente || "Íris"}, o assistente pessoal ${deDono(config)}. Falas português de Portugal, de forma simpática, confiante e direta, com um toque de humor discreto.
 Trata a pessoa por tu.
 Ajudas em tudo o que for útil no dia a dia: responder a perguntas, redigir mensagens e emails, planear o dia, explicar coisas, dar ideias.
 As tuas respostas podem ser lidas em voz alta: evita tabelas e formatação complicada; usa listas curtas só quando ajudam.
 
 Agora são ${dataHora} (hora de Lisboa, fuso Europe/Lisbon). ISO de agora: ${agora.toISOString()}.
-Quando a pessoa pedir para lembrar, anotar ou marcar algo, cria a tarefa em "tarefas" (com "quando" em ISO 8601 se houver data ou hora; "amanhã de manhã" = 09:00) e confirma na resposta de forma curta.
-Não inventes factos: se não souberes algo (por exemplo notícias de hoje ou o tempo), diz que não tens essa informação.
+Quando a pessoa pedir para lembrar, anotar ou marcar algo com data ou prazo, cria a tarefa em "tarefas" (com "quando" em ISO 8601 se houver data ou hora; "amanhã de manhã" = 09:00) e confirma na resposta de forma curta.
+
+Memória — o que sabes sobre ${dono(config)} (usa com naturalidade, sem recitar):
+${listaMemorias}
+Guarda em "lembrar" factos novos e duradouros que a pessoa te conte ou peça para lembrar (ex.: "o meu médico é o Dr. Silva", "sou alérgico a marisco", "a minha filha chama-se Ana"). Não guardes coisas passageiras, nem repetidas, nem palavras-passe, códigos ou dados bancários.
+Se a pessoa pedir para esqueceres algo, ou um facto mudar, põe o ID em "esquecer" (e o facto novo em "lembrar").
+
+Internet: não tens informação atual. Se a pergunta precisar dela (notícias, horários, preços, resultados, moradas, previsão do tempo...), escreve a pesquisa em "pesquisar" e na "resposta" diz só que vais ver. Não inventes factos.
+
+Anexos: se receberes uma fatura, carta, convocatória ou outro documento, resume o essencial (quem, valor, prazo ou data, referência de pagamento) e cria a tarefa para o prazo (ex.: "Pagar fatura EDP de 45,20 €", às 09:00 do último dia). Se for um áudio, transcreve ou resume o que for pedido; se for um vídeo ou foto, descreve o que importa.
 
 Informação sobre ${dono(config)} que podes usar:
 """
 ${config.instrucoes}
-"""`,
-        messages,
-        schema: SCHEMA_CONVERSA,
-        effort: "low",
-        timeout: 60_000,
-      });
+"""`;
+      const r = await motor.gerarJSON({ system, messages, schema: SCHEMA_CONVERSA, effort: "low", timeout: 60_000 });
+      r.fontes = [];
+      if (r.pesquisar && motor.pesquisar) {
+        try {
+          const p = await motor.pesquisar({
+            system: `${system}\n\nPesquisa na internet e responde à última mensagem da pessoa com a informação encontrada. Resposta curta, em português de Portugal, para ser lida em voz alta. Não uses JSON.`,
+            messages: messages.map((m, i) => (i === messages.length - 1 ? { ...m, content: `${historico.at(-1).texto}\n\n(Pesquisa: ${r.pesquisar})` } : m)),
+          });
+          r.resposta = p.texto;
+          r.fontes = p.fontes;
+        } catch (erro) {
+          console.error("Erro na pesquisa:", erro.status || "", erro.message);
+          r.resposta = "Tentei pesquisar na internet, mas não consegui agora. Tenta daqui a pouco.";
+        }
+      }
+      return r;
     },
+
+    // Ficheiros (áudio, vídeo, PDF...): só o Gemini os aceita.
+    carregarFicheiro: motor.carregarFicheiro ? (dados, mime, nome) => motor.carregarFicheiro(dados, mime, nome) : null,
   };
 }

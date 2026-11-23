@@ -13,6 +13,16 @@ Assistente pessoal com inteligência artificial (Gemini grátis ou Claude):
 - **🗣️ Voz natural.** A Íris fala com uma voz gerada pela IA da Google
   (várias vozes à escolha, femininas e masculinas). Se a voz natural falhar ou
   passar o limite grátis, usa a melhor voz do telemóvel.
+- **🧠 Memória.** "Lembra-te que o meu médico é o Dr. Silva": a Íris guarda
+  factos sobre ti (no Neon) e usa-os nas conversas. Vês e apagas tudo em
+  Definições. Nunca guarda cartões, IBAN nem códigos.
+- **🔎 Pesquisa na internet.** Para notícias, horários, preços, resultados ou
+  o tempo, a Íris pesquisa (Pesquisa Google do Gemini ou web search do Claude)
+  e mostra as fontes.
+- **📎 Analisa qualquer ficheiro.** Fotos, vídeos, áudios (notas de voz),
+  PDFs, faturas e cartas: resume, transcreve, descreve, e cria o lembrete do
+  prazo de pagamento sozinha. Vídeo, áudio e PDF precisam do Gemini (até 50 MB;
+  a Google apaga-os ao fim de 48 h).
 - **✅ Tarefas e lembretes.** Dizes "lembra-me amanhã às 9 de pagar a luz" e
   a tarefa é criada. Com **📅 Ligar ao calendário** (uma vez só), o telemóvel
   subscreve o calendário da Íris e as tarefas com data aparecem lá sozinhas,

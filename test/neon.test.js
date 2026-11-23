@@ -19,6 +19,7 @@ test("Neon: config, tarefas e chamadas sobrevivem a um reinício", { skip: !temN
   assert.equal(a1.lerConfig().nomeAssistente, "Íris"); // tabelas novas: valores por omissão
 
   a1.guardarConfig({ nomeAssistente: "Atlas", soContactos: true, diasRetencao: 30 });
+  a1.guardarValor("memorias", [{ id: "m1", texto: "O médico é o Dr. Silva" }]);
   a1.guardarTarefas([{ id: "t1", titulo: "Ir ao IMT", quando: "2026-11-24T13:00:00.000Z", notas: "", feita: false }]);
   const recente = { id: "CA_NOVA", de: "+351912345678", inicio: new Date().toISOString(), turnos: [{ quem: "pessoa", texto: "Olá" }] };
   const antiga = { id: "CA_VELHA", de: "+351900000000", inicio: new Date(Date.now() - 40 * 86_400_000).toISOString(), turnos: [] };
@@ -32,6 +33,7 @@ test("Neon: config, tarefas e chamadas sobrevivem a um reinício", { skip: !temN
   assert.equal(a2.lerConfig().nomeAssistente, "Atlas");
   assert.equal(a2.lerConfig().soContactos, true);
   assert.deepEqual(a2.lerTarefas().map((t) => t.titulo), ["Ir ao IMT"]);
+  assert.deepEqual(a2.lerValor("memorias", []).map((m) => m.texto), ["O médico é o Dr. Silva"]);
   assert.deepEqual(a2.listarChamadas().map((c) => c.id), ["CA_NOVA"]);
   assert.equal(a2.listarChamadas()[0].turnos[0].texto, "Olá");
 });

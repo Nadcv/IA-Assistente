@@ -9,6 +9,7 @@ const { criarApp } = await import("../src/server.js");
 const { criarArmazem, nomeDoContacto, estaNaLista } = await import("../src/armazem.js");
 const { redigir } = await import("../src/privacidade.js");
 const { criarIA, motorClaude, motorGemini, qualIA, custoIA, explicarErro, pensamentoGemini, pcmParaWav } = await import("../src/ia.js");
+const RESPOSTA_VAZIA = { resposta: "", tarefas: [], lembrar: [], esquecer: [], pesquisar: "" };
 
 let servidor, base, pasta, armazemTeste;
 const sms = [];
@@ -40,9 +41,19 @@ const iaFalsa = {
   async falar(texto, voz) {
     return Buffer.from(`WAV:${voz}:${texto}`);
   },
-  async conversar(config, { historico, imagem }) {
-    ultimaConversa = { historico, imagem };
-    return { resposta: "Combinado!", tarefas: [{ titulo: "Pagar a luz", quando: "2026-11-22T09:00:00Z", notas: "" }] };
+  async carregarFicheiro(dados, mime, nome) {
+    return { uri: "https://generativelanguage.googleapis.com/v1beta/files/abc123", mime, nome: `${nome}:${dados.length}` };
+  },
+  async conversar(config, { historico, imagem, ficheiro, memorias }) {
+    ultimaConversa = { historico, imagem, ficheiro, memorias };
+    const ultima = historico.at(-1).texto;
+    if (/lembra-te/.test(ultima)) {
+      return { resposta: "Fica guardado.", tarefas: [], lembrar: ["O médico é o Dr. Silva", "Cartão 4111 1111 1111 1111"], esquecer: [], fontes: [] };
+    }
+    if (/esquece/.test(ultima)) {
+      return { resposta: "Esquecido.", tarefas: [], lembrar: [], esquecer: memorias.map((m) => m.id), fontes: [] };
+    }
+    return { resposta: "Combinado!", tarefas: [{ titulo: "Pagar a luz", quando: "2026-11-22T09:00:00Z", notas: "" }], lembrar: [], esquecer: [] };
   },
 };
 
@@ -396,11 +407,11 @@ test("imagens chegam no formato certo ao Claude e ao Gemini", async () => {
   let pedidoClaude, pedidoGemini;
   const claude = { beta: { messages: { async create(p) {
     pedidoClaude = p;
-    return { stop_reason: "end_turn", content: [{ type: "text", text: '{"resposta":"É um gato","tarefas":[]}' }] };
+    return { stop_reason: "end_turn", content: [{ type: "text", text: '{"resposta":"É um gato","tarefas":[],"lembrar":[],"esquecer":[],"pesquisar":""}' }] };
   } } } };
   const gemini = { models: { async generateContent(p) {
     pedidoGemini = p;
-    return { text: '{"resposta":"É um gato","tarefas":[]}' };
+    return { text: '{"resposta":"É um gato","tarefas":[],"lembrar":[],"esquecer":[],"pesquisar":""}' };
   } } };
   const pedido = { historico: [{ role: "user", texto: "O que é isto?" }], imagem: { mime: "image/png", dados: PNG_1PX }, agora: new Date("2026-11-21T12:00:00Z") };
   const config = { nomeDono: "Ana", instrucoes: "x" };
@@ -424,7 +435,7 @@ test("Gemini responde depressa: pouco pensamento, e tira-o se o modelo não acei
   const clienteFalso = { models: { async generateContent(p) {
     configs.push(p.config.thinkingConfig);
     if (p.config.thinkingConfig) throw Object.assign(new Error("thinking_level is not supported"), { status: 400 });
-    return { text: '{"resposta":"Olá","tarefas":[]}' };
+    return { text: '{"resposta":"Olá","tarefas":[],"lembrar":[],"esquecer":[],"pesquisar":""}' };
   } } };
   const ia = criarIA(motorGemini(clienteFalso, "gemini-3.8-flash"));
   const r = await ia.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "Olá" }] });
@@ -509,7 +520,7 @@ test("Gemini sem quota: muda logo para outro modelo (cada um tem a sua quota gr�
     async generateContent(p) {
       usados.push(p.model);
       if (semQuota.includes(p.model)) throw Object.assign(new Error("Quota exceeded for metric GenerateRequestsPerDayPerProjectPerModel-FreeTier"), { status: 429 });
-      return { text: '{"resposta":"Já está","tarefas":[]}' };
+      return { text: '{"resposta":"Já está","tarefas":[],"lembrar":[],"esquecer":[],"pesquisar":""}' };
     },
     async list() { return (async function* () {
       for (const n of ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-2.5-flash-preview-tts"]) yield { name: "models/" + n };
@@ -519,4 +530,100 @@ test("Gemini sem quota: muda logo para outro modelo (cada um tem a sua quota gr�
   const r = await ia.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "Olá" }] });
   assert.equal(r.resposta, "Já está");
   assert.deepEqual(usados, ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite"]);
+});
+
+test("memória: aprende nas conversas (sem dados sensíveis), lista, apaga e esquece", async () => {
+  const h = await entrar();
+  const conversar = (texto) => fetch(base + "/api/conversar", { method: "POST", headers: h, body: JSON.stringify({ historico: [{ role: "user", texto }] }) }).then((r) => r.json());
+
+  let r = await conversar("lembra-te que o meu médico é o Dr. Silva");
+  assert.deepEqual(r.memoriasNovas, ["O médico é o Dr. Silva", "Cartão [cartão removido]"]);
+  r = await conversar("lembra-te outra vez");
+  assert.deepEqual(r.memoriasNovas, [], "não repete memórias");
+
+  let mems = await (await fetch(base + "/api/memorias", { headers: h })).json();
+  assert.equal(mems.length, 2);
+  await conversar("olá");
+  assert.deepEqual(ultimaConversa.memorias.map((m) => m.texto), mems.map((m) => m.texto), "a IA recebe a memória");
+
+  await fetch(base + "/api/memorias/" + mems[1].id, { method: "DELETE", headers: h });
+  await fetch(base + "/api/memorias", { method: "POST", headers: h, body: JSON.stringify({ texto: "Sou alérgico a marisco" }) });
+  mems = await (await fetch(base + "/api/memorias", { headers: h })).json();
+  assert.deepEqual(mems.map((m) => m.texto), ["O médico é o Dr. Silva", "Sou alérgico a marisco"]);
+
+  r = await conversar("esquece tudo");
+  assert.equal(r.memoriasEsquecidas, 2);
+  assert.deepEqual(await (await fetch(base + "/api/memorias", { headers: h })).json(), []);
+});
+
+test("ficheiros: envia para o Gemini e a conversa recebe a referência", async () => {
+  const h = await entrar();
+  let r = await fetch(base + "/api/ficheiros", {
+    method: "POST",
+    headers: { Authorization: h.Authorization, "Content-Type": "audio/mp4", "X-Nome-Ficheiro": encodeURIComponent("nota de voz.m4a") },
+    body: Buffer.alloc(1234),
+  });
+  const ficheiro = await r.json();
+  assert.equal(ficheiro.nome, "nota de voz.m4a:1234");
+  assert.equal(ficheiro.mime, "audio/mp4");
+
+  r = await fetch(base + "/api/conversar", { method: "POST", headers: h, body: JSON.stringify({ historico: [{ role: "user", texto: "Resume" }], ficheiro }) });
+  assert.equal(r.status, 200);
+  assert.equal(ultimaConversa.ficheiro.uri, ficheiro.uri);
+
+  r = await fetch(base + "/api/conversar", { method: "POST", headers: h, body: JSON.stringify({ historico: [{ role: "user", texto: "x" }], ficheiro: { uri: "https://evil.example/x", mime: "audio/mp4" } }) });
+  assert.equal(r.status, 400, "só aceita ficheiros da Google");
+  r = await fetch(base + "/api/ficheiros", { method: "POST", headers: { Authorization: h.Authorization, "Content-Type": "audio/mp4" }, body: Buffer.alloc(0) });
+  assert.equal(r.status, 400);
+});
+
+test("Gemini: ficheiros vão como fileData, vídeos esperam pelo processamento", async () => {
+  let pedido, estados = ["PROCESSING", "ACTIVE"];
+  const cliente = {
+    files: {
+      async upload({ file, config }) { assert.equal(file.size, 10); return { name: "files/v1", uri: "https://generativelanguage.googleapis.com/v1beta/files/v1", mimeType: config.mimeType, state: "PROCESSING" }; },
+      async get() { return { name: "files/v1", uri: "https://generativelanguage.googleapis.com/v1beta/files/v1", mimeType: "video/mp4", state: estados.shift() }; },
+    },
+    models: { async generateContent(p) { pedido = p; return { text: JSON.stringify({ ...RESPOSTA_VAZIA, resposta: "É um vídeo de um gato" }) }; } },
+  };
+  const ia = criarIA(motorGemini(cliente, "gemini-2.5-flash"));
+  const f = await ia.carregarFicheiro(Buffer.alloc(10), "video/mp4", "gato.mp4");
+  assert.equal(f.uri, "https://generativelanguage.googleapis.com/v1beta/files/v1");
+  const r = await ia.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "O que é?" }], ficheiro: f });
+  assert.equal(r.resposta, "É um vídeo de um gato");
+  assert.deepEqual(pedido.contents[0].parts[0], { fileData: { fileUri: f.uri, mimeType: "video/mp4" } });
+
+  // O Claude não aceita estes ficheiros: erro claro.
+  const claude = criarIA(motorClaude({ beta: { messages: { create: async () => ({}) } } }));
+  await assert.rejects(claude.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "x" }], ficheiro: f }), /só funcionam com o Gemini/);
+  assert.equal(claude.carregarFicheiro, null);
+});
+
+test("pesquisa na internet: quando a IA pede, pesquisa e devolve fontes", async () => {
+  const pedidos = [];
+  const cliente = { models: { async generateContent(p) {
+    pedidos.push(p);
+    if (p.config.tools) {
+      return { text: "O Benfica ganhou 2-1.", candidates: [{ groundingMetadata: { groundingChunks: [{ web: { uri: "https://exemplo.pt/jogo", title: "exemplo.pt" } }] } }] };
+    }
+    return { text: JSON.stringify({ ...RESPOSTA_VAZIA, resposta: "Vou ver.", pesquisar: "resultado Benfica ontem" }) };
+  } } };
+  const ia = criarIA(motorGemini(cliente, "gemini-2.5-flash"));
+  const r = await ia.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "Quanto ficou o Benfica?" }] });
+  assert.equal(r.resposta, "O Benfica ganhou 2-1.");
+  assert.deepEqual(r.fontes, [{ url: "https://exemplo.pt/jogo", titulo: "exemplo.pt" }]);
+  assert.deepEqual(pedidos[1].config.tools, [{ googleSearch: {} }]);
+  assert.match(pedidos[1].contents.at(-1).parts[0].text, /resultado Benfica ontem/);
+
+  // Claude: usa a ferramenta web_search e lê as citações.
+  let pedidoClaude;
+  const claude = criarIA(motorClaude({ beta: { messages: { async create(p) {
+    if (!p.tools) return { stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify({ ...RESPOSTA_VAZIA, resposta: "Vou ver.", pesquisar: "tempo Lisboa amanhã" }) }] };
+    pedidoClaude = p;
+    return { stop_reason: "end_turn", content: [{ type: "text", text: "Amanhã chove.", citations: [{ url: "https://ipma.pt", title: "IPMA" }] }] };
+  } } } }));
+  const rc = await claude.conversar({ nomeDono: "Ana", instrucoes: "x" }, { historico: [{ role: "user", texto: "Vai chover?" }] });
+  assert.equal(rc.resposta, "Amanhã chove.");
+  assert.deepEqual(rc.fontes, [{ url: "https://ipma.pt", titulo: "IPMA" }]);
+  assert.equal(pedidoClaude.tools[0].type, "web_search_20260209");
 });

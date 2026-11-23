@@ -22,6 +22,12 @@
   .ela { align-self:flex-start; background:#0b1220; border:1px solid #334155; border-bottom-left-radius:4px; }
   .ela.erro { color:var(--warn); }
   .criada { align-self:flex-start; font-size:13px; color:var(--ok); }
+  .memoria { align-self:flex-start; font-size:13px; color:#c4b5fd; }
+  .fontes { align-self:flex-start; font-size:12px; color:var(--mut); max-width:85%; }
+  .fontes a { color:var(--ac); margin-right:8px; }
+  .nomeAnexo { font-size:14px; color:var(--mut); }
+  .mem { display:flex; gap:8px; align-items:center; padding:6px 0; border-bottom:1px solid #334155; }
+  .mem:last-child { border-bottom:0; } .mem span { flex:1; }
   .barra { display:flex; gap:6px; align-items:flex-end; }
   .barra textarea { min-height:44px; height:44px; flex:1; }
   .barra button { height:44px; }
@@ -54,7 +60,8 @@
   .transc.aberta { display:block; }
   .transc p { margin:4px 0; }
   .oculto { display:none !important; }
-  .linha { display:flex; gap:8px; align-items:center; }
+  .linha { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  #escolhaVoz { max-width:100%; flex:1 1 180px; }
   .interruptor { display:flex; align-items:center; gap:10px; font-size:16px; color:var(--txt); }
   .interruptor input { width:auto; transform:scale(1.4); }
 
@@ -129,17 +136,17 @@
     <section id="assistente">
       <div class="card">
         <div id="chat" class="chat"></div>
-        <div id="previaChat" class="previa oculto"><img alt=""><button id="tirarImgChat">✕</button></div>
+        <div id="previaChat" class="previa oculto"><img alt=""><span class="nomeAnexo"></span><button id="tirarImgChat">✕</button></div>
         <div class="barra">
           <button id="microfone" title="Falar">🎤</button>
-          <button id="anexarChat" title="Imagem">📷</button>
-          <textarea id="pergunta" placeholder="Pergunta ou pede alguma coisa… (ex.: lembra-me amanhã às 9 de pagar a luz)"></textarea>
+          <button id="anexarChat" title="Anexar foto, vídeo, áudio, PDF…">📎</button>
+          <textarea id="pergunta" placeholder="Pergunta, pede ou anexa (📎 foto, vídeo, áudio, fatura…)"></textarea>
           <button id="enviar" class="prim">➤</button>
         </div>
-        <input type="file" id="ficheiroChat" accept="image/*" class="oculto">
+        <input type="file" id="ficheiroChat" class="oculto">
         <div class="linha" style="margin-top:10px; justify-content:space-between">
           <label class="interruptor" style="margin:0; font-size:14px"><input type="checkbox" id="lerVoz"> 🔊 Ler respostas</label>
-          <select id="escolhaVoz" style="width:auto; padding:8px" title="Voz">
+          <select id="escolhaVoz" style="padding:8px" title="Voz">
             <option value="Aoede">Voz natural: Aoede (feminina, suave)</option>
             <option value="Kore">Voz natural: Kore (feminina, firme)</option>
             <option value="Leda">Voz natural: Leda (feminina, jovem)</option>
@@ -224,6 +231,12 @@
         <p id="okConfig" class="mut"></p>
         <button class="prim" type="submit">Guardar</button>
       </form>
+      <div class="card">
+        <b>🧠 O que a Íris sabe sobre ti</b>
+        <p class="mut">Ela aprende nas conversas ("lembra-te que…"). Podes apagar o que quiseres ou acrescentar à mão.</p>
+        <div id="listaMemorias"><p class="mut">A carregar…</p></div>
+        <div class="linha" style="margin-top:8px"><input id="novaMemoria" placeholder="Ex.: Sou alérgico a marisco"><button id="juntarMemoria">➕</button></div>
+      </div>
       <div class="card">
         <b>Ligação à IA</b>
         <p id="estadoIA" class="mut">Carrega no botão para testar se a IA está a responder.</p>
@@ -380,7 +393,51 @@ function seletorImagem(botao, entrada, caixaPrevia, tirar) {
   return estado;
 }
 const imagemMsg = seletorImagem("#anexarMsg", "#ficheiroMsg", "#previaMsg", "#tirarImgMsg");
-const imagemChat = seletorImagem("#anexarChat", "#ficheiroChat", "#previaChat", "#tirarImgChat");
+// Anexo do chat: imagens são reduzidas no telemóvel; o resto (vídeo, áudio,
+// PDF...) vai tal como está para o servidor, que o envia para o Gemini.
+const anexoChat = (() => {
+  const input = $("#ficheiroChat"), previa = $("#previaChat");
+  const estado = {
+    imagem: null, ficheiro: null,
+    get vazio() { return !estado.imagem && !estado.ficheiro; },
+    limpar() { estado.imagem = estado.ficheiro = null; previa.classList.add("oculto"); input.value = ""; },
+  };
+  $("#anexarChat").onclick = () => input.click();
+  input.onchange = async () => {
+    const f = input.files[0];
+    if (!f) return;
+    estado.limpar();
+    const img = previa.querySelector("img"), nome = previa.querySelector(".nomeAnexo");
+    try {
+      if (f.type.startsWith("image/") && !/gif/.test(f.type)) {
+        const { mime, dados, url } = await reduzirImagem(f);
+        estado.imagem = { mime, dados };
+        img.src = url; img.classList.remove("oculto"); nome.textContent = "";
+      } else {
+        if (f.size > 50 * 1024 * 1024) throw new Error("Ficheiro demasiado grande (máx. 50 MB).");
+        estado.ficheiro = f;
+        img.classList.add("oculto");
+        const icone = f.type.startsWith("video/") ? "🎬" : f.type.startsWith("audio/") ? "🎧" : /pdf/.test(f.type) ? "📄" : "📎";
+        nome.textContent = `${icone} ${f.name} (${(f.size / 1048576).toFixed(1)} MB)`;
+      }
+      previa.classList.remove("oculto");
+    } catch (err) { alert(err.message); }
+  };
+  $("#tirarImgChat").onclick = () => estado.limpar();
+  return estado;
+})();
+// Envia um ficheiro para o servidor (que o passa ao Gemini) e devolve a referência.
+async function enviarFicheiro(f) {
+  const tipo = !f.type || /json/.test(f.type) ? "text/plain" : f.type;
+  const r = await fetch("/api/ficheiros", {
+    method: "POST",
+    headers: { "Content-Type": tipo, "X-Nome-Ficheiro": encodeURIComponent(f.name), Authorization: "Bearer " + token },
+    body: f,
+  });
+  const dados = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(dados.erro || "Não consegui enviar o ficheiro.");
+  return dados;
+}
 
 // --- Assistente (chat por texto ou voz) ---
 const guardado = (k, padrao) => { try { return JSON.parse(localStorage.getItem(k)) ?? padrao; } catch { return padrao; } };
@@ -473,12 +530,14 @@ async function falar(texto, sempre = false) {
 
 // Envia uma pergunta ao assistente, guarda a conversa e cria as tarefas.
 // textoEnviado (opcional) substitui o texto mostrado no pedido à IA.
-async function perguntarIA(texto, { imagem = null, textoEnviado = null } = {}) {
-  conversa.push({ role: "user", texto: texto || "(imagem)" });
+async function perguntarIA(texto, { imagem = null, ficheiroLocal = null, textoEnviado = null } = {}) {
+  const descricao = texto || (imagem ? "O que vês nesta imagem?" : ficheiroLocal ? `Analisa este ficheiro: ${ficheiroLocal.name}` : "");
+  conversa.push({ role: "user", texto: descricao });
   const historico = conversa.slice(-20).map((m) => ({ ...m }));
   if (textoEnviado) historico[historico.length - 1].texto = textoEnviado;
   try {
-    const r = await api("/api/conversar", { method: "POST", body: JSON.stringify({ historico, imagem }) });
+    const ficheiro = ficheiroLocal ? await enviarFicheiro(ficheiroLocal) : null;
+    const r = await api("/api/conversar", { method: "POST", body: JSON.stringify({ historico, imagem, ficheiro }) });
     conversa.push({ role: "assistant", texto: r.resposta });
     conversa = conversa.slice(-40);
     guardar("conversa", conversa);
@@ -491,21 +550,27 @@ async function perguntarIA(texto, { imagem = null, textoEnviado = null } = {}) {
 }
 async function enviarPergunta() {
   const texto = $("#pergunta").value.trim();
-  const imagem = imagemChat.valor;
-  if (!texto && !imagem) return;
+  const imagem = anexoChat.imagem, ficheiroLocal = anexoChat.ficheiro;
+  if (!texto && anexoChat.vazio) return;
   $("#pergunta").value = "";
-  imagemChat.limpar();
+  anexoChat.limpar();
   mostrarConversa();
-  $("#chat").append(el("div", { className: "bolha eu", textContent: texto || "(imagem)" }));
-  const aPensar = el("div", { className: "bolha ela", textContent: "…" });
+  $("#chat").append(el("div", { className: "bolha eu", textContent: texto || (ficheiroLocal ? "📎 " + ficheiroLocal.name : "📷 imagem") }));
+  const aPensar = el("div", { className: "bolha ela", textContent: ficheiroLocal ? "A enviar e analisar o ficheiro…" : "…" });
   $("#chat").append(aPensar); $("#chat").scrollTop = $("#chat").scrollHeight;
   $("#enviar").disabled = true;
   try {
-    const r = await perguntarIA(texto, { imagem });
+    const r = await perguntarIA(texto, { imagem, ficheiroLocal });
     mostrarConversa();
+    if (r.fontes?.length) {
+      $("#chat").append(el("div", { className: "fontes" }, "🔎 Fontes: ",
+        ...r.fontes.map((f) => el("a", { href: f.url, target: "_blank", rel: "noopener", textContent: f.titulo.slice(0, 40) }))));
+    }
     for (const t of r.tarefas || []) {
       $("#chat").append(el("div", { className: "criada", textContent: "✅ Tarefa criada: " + t.titulo + (t.quando ? " — " + dataBonita(t.quando) : "") }));
     }
+    for (const m of r.memoriasNovas || []) $("#chat").append(el("div", { className: "memoria", textContent: "🧠 Vou lembrar-me: " + m }));
+    if (r.memoriasEsquecidas) $("#chat").append(el("div", { className: "memoria", textContent: "🧠 Esqueci " + r.memoriasEsquecidas + " coisa(s)." }));
     $("#chat").scrollTop = $("#chat").scrollHeight;
     falar(r.resposta);
   } catch (err) {
@@ -770,7 +835,7 @@ async function hudPerguntar(mostrado, enviado = null) {
   try {
     const r = await perguntarIA(mostrado, { textoEnviado: enviado });
     mostrarConversa(); hudTarefas();
-    const extra = (r.tarefas || []).map((t) => "✅ " + t.titulo).join("\n");
+    const extra = [...(r.tarefas || []).map((t) => "✅ " + t.titulo), ...(r.memoriasNovas || []).map((m) => "🧠 " + m)].join("\n");
     hudEscrever(r.resposta + (extra ? "\n" + extra : ""));
     hudEstado("falar", "A RESPONDER");
     if (r.tempoMs) $("#hudOuvido").textContent += `  ·  ${(r.tempoMs / 1000).toFixed(1)} s`;
@@ -838,6 +903,27 @@ function fecharHud() {
 }
 $("#abrirHud").onclick = abrirHud;
 $("#hudSair").onclick = fecharHud;
+
+// ---------- Memória ----------
+async function carregarMemorias() {
+  const lista = $("#listaMemorias");
+  try {
+    const mems = await api("/api/memorias");
+    if (!mems.length) { lista.replaceChildren(el("p", { className: "mut", textContent: "Ainda não sabe nada. Diz-lhe, por exemplo: \"lembra-te que o meu médico é o Dr. Silva\"." })); return; }
+    lista.replaceChildren(...mems.map((m) => {
+      const apagar = el("button", { textContent: "🗑" });
+      apagar.onclick = async () => { await api("/api/memorias/" + encodeURIComponent(m.id), { method: "DELETE" }); carregarMemorias(); };
+      return el("div", { className: "mem" }, el("span", { textContent: m.texto }), apagar);
+    }));
+  } catch (err) { lista.replaceChildren(el("p", { className: "nota", textContent: err.message })); }
+}
+$("#juntarMemoria").onclick = async () => {
+  const texto = $("#novaMemoria").value.trim();
+  if (!texto) return;
+  await api("/api/memorias", { method: "POST", body: JSON.stringify({ texto }) });
+  $("#novaMemoria").value = ""; carregarMemorias();
+};
+document.querySelector('nav button[data-sec="definicoes"]').addEventListener("click", carregarMemorias);
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
 mostrar();

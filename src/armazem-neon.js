@@ -32,10 +32,11 @@ export async function criarArmazemNeon(urlOuSql = process.env.DATABASE_URL, { pr
   )`);
   await q(`create index if not exists ${CHAMADAS}_inicio on ${CHAMADAS} (inicio desc)`);
 
-  const linhas = await q(`select chave, valor from ${DADOS} where chave in ('config', 'tarefas')`);
+  const linhas = await q(`select chave, valor from ${DADOS}`);
   const valor = (k, padrao) => linhas.find((l) => l.chave === k)?.valor ?? padrao;
   let config = { ...CONFIG_PADRAO, ...valor("config", {}) };
   let tarefas = valor("tarefas", []);
+  const outros = new Map(linhas.filter((l) => !["config", "tarefas"].includes(l.chave)).map((l) => [l.chave, l.valor]));
   let chamadas = (await q(`select dados from ${CHAMADAS} order by inicio desc limit 500`)).map((l) => l.dados);
 
   // Fila de escrita: grava por ordem e regista falhas sem derrubar o servidor.
@@ -72,6 +73,15 @@ export async function criarArmazemNeon(urlOuSql = process.env.DATABASE_URL, { pr
       config = atual;
       gravarDados("config", config);
       return { ...config };
+    },
+    // Valores genéricos (memória, notificações...): linhas da tabela de dados.
+    lerValor(chave, padrao) {
+      return outros.has(chave) ? outros.get(chave) : padrao;
+    },
+    guardarValor(chave, v) {
+      if (["config", "tarefas"].includes(chave)) throw new Error(`Chave reservada: ${chave}`);
+      outros.set(chave, v);
+      gravarDados(chave, v);
     },
     lerTarefas() {
       return tarefas;

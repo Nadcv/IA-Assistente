@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { criarArmazem } from "./armazem.js";
 import { criarArmazemNeon } from "./armazem-neon.js";
+import { redigir } from "./privacidade.js";
 import { criarIA } from "./ia.js";
 import { criarNotificador } from "./notificar.js";
 import { rotasVoz } from "./voz.js";
@@ -117,10 +118,67 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
   });
 
   // Assistente pessoal (chat por texto ou voz) que também cria tarefas.
+  // --- Memória: o que a Íris sabe sobre ti (guardado no armazém/Neon) ---
+  const MAX_MEMORIAS = 200;
+  const lerMemorias = () => armazem.lerValor("memorias", []);
+  const juntarMemorias = (textos) => {
+    const lista = lerMemorias();
+    const novas = [];
+    for (const t of textos) {
+      const texto = redigir(String(t || "").trim()).slice(0, 300); // nada de cartões/IBAN/códigos
+      if (!texto || lista.some((m) => m.texto.toLowerCase() === texto.toLowerCase())) continue;
+      const m = { id: "m" + crypto.randomBytes(4).toString("hex"), texto, criado: new Date().toISOString() };
+      lista.push(m);
+      novas.push(m);
+    }
+    armazem.guardarValor("memorias", lista.slice(-MAX_MEMORIAS));
+    return novas;
+  };
+  const apagarMemorias = (ids) => {
+    const lista = lerMemorias();
+    const ficam = lista.filter((m) => !ids.includes(m.id));
+    if (ficam.length !== lista.length) armazem.guardarValor("memorias", ficam);
+    return lista.length - ficam.length;
+  };
+  app.get("/api/memorias", exigirLogin, (req, res) => res.json(lerMemorias()));
+  app.post("/api/memorias", exigirLogin, (req, res) => {
+    const novas = juntarMemorias([req.body?.texto]);
+    res.json({ novas });
+  });
+  app.delete("/api/memorias/:id", exigirLogin, (req, res) => res.json({ apagadas: apagarMemorias([req.params.id]) }));
+
+  // Ficheiro de um anexo já enviado para o Gemini (só aceitamos URIs da Google).
+  const lerFicheiro = (f) => {
+    if (!f) return null;
+    const uri = String(f.uri || "");
+    if (!/^https:\/\/generativelanguage\.googleapis\.com\/[\w./-]+$/.test(uri)) throw new Error("Ficheiro inválido.");
+    return { uri, mime: String(f.mime || "application/octet-stream").slice(0, 100), nome: String(f.nome || "ficheiro").slice(0, 100) };
+  };
+
+  // Recebe um ficheiro (áudio, vídeo, PDF, foto...) e envia-o para o Gemini.
+  app.post(
+    "/api/ficheiros",
+    exigirLogin,
+    express.raw({ type: () => true, limit: "60mb" }),
+    async (req, res) => {
+      if (!ia.carregarFicheiro) return res.status(501).json({ erro: "Ficheiros de áudio, vídeo e documentos só funcionam com o Gemini." });
+      if (!req.body?.length) return res.status(400).json({ erro: "Ficheiro vazio." });
+      const mime = String(req.get("Content-Type") || "application/octet-stream").split(";")[0];
+      const nome = decodeURIComponent(String(req.get("X-Nome-Ficheiro") || "ficheiro")).slice(0, 100);
+      try {
+        res.json(await ia.carregarFicheiro(req.body, mime, nome));
+      } catch (erro) {
+        console.error("Erro ao enviar ficheiro:", erro.status || "", erro.message);
+        res.status(502).json({ erro: ia.explicarErro ? ia.explicarErro(erro) : erro.message });
+      }
+    },
+  );
+
   app.post("/api/conversar", exigirLogin, async (req, res) => {
-    let imagem;
+    let imagem, ficheiro;
     try {
       imagem = lerImagem(req.body?.imagem);
+      ficheiro = lerFicheiro(req.body?.ficheiro);
     } catch (erro) {
       return res.status(400).json({ erro: erro.message });
     }
@@ -134,13 +192,24 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
     }
     try {
       const inicio = Date.now();
-      const r = await ia.conversar(armazem.lerConfig(), { historico, imagem });
+      const r = await ia.conversar(armazem.lerConfig(), { historico, imagem, ficheiro, memorias: lerMemorias() });
+      const esquecidas = apagarMemorias(Array.isArray(r.esquecer) ? r.esquecer.map(String) : []);
+      const novas = juntarMemorias(Array.isArray(r.lembrar) ? r.lembrar : []);
       const tempoMs = Date.now() - inicio;
       console.log(`Assistente respondeu em ${tempoMs} ms (${ia.modelo || "?"})`);
-      res.json({ ...r, tempoMs, modelo: ia.modelo });
+      res.json({
+        resposta: r.resposta,
+        tarefas: r.tarefas || [],
+        fontes: r.fontes || [],
+        memoriasNovas: novas.map((m) => m.texto),
+        memoriasEsquecidas: esquecidas,
+        tempoMs,
+        modelo: ia.modelo,
+      });
     } catch (erro) {
       console.error("Erro no assistente:", erro.status || "", erro.message);
-      res.status(502).json({ erro: ia.explicarErro ? ia.explicarErro(erro) : "A IA não respondeu. Tenta outra vez." });
+      const motivo = erro.amigavel ? erro.message : ia.explicarErro ? ia.explicarErro(erro) : "A IA não respondeu. Tenta outra vez.";
+      res.status(502).json({ erro: motivo });
     }
   });
 
