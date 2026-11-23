@@ -6,6 +6,7 @@ import express from "express";
 import { criarArmazem } from "./armazem.js";
 import { criarArmazemNeon } from "./armazem-neon.js";
 import { redigir } from "./privacidade.js";
+import { criarNotificacoes } from "./notificacoes.js";
 import { criarIA } from "./ia.js";
 import { criarNotificador } from "./notificar.js";
 import { rotasVoz } from "./voz.js";
@@ -36,10 +37,11 @@ export function calendarioICS(tarefas, nome) {
   return linhas.join("\r\n") + "\r\n";
 }
 
-export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_SENHA } = {}) {
+export function criarApp({ ia, armazem, notificador, notificacoes, senha = process.env.PAINEL_SENHA } = {}) {
   armazem ??= criarArmazem();
   ia ??= criarIA();
   notificador ??= criarNotificador();
+  notificacoes ??= criarNotificacoes({ armazem });
 
   const app = express();
   app.disable("x-powered-by");
@@ -90,7 +92,29 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
   };
 
   app.get("/api/config", exigirLogin, (req, res) => res.json(armazem.lerConfig()));
-  app.put("/api/config", exigirLogin, (req, res) => res.json(armazem.guardarConfig(req.body || {})));
+  app.put("/api/config", exigirLogin, (req, res) => {
+    const dados = { ...(req.body || {}) };
+    if ("horaResumo" in dados && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(dados.horaResumo))) delete dados.horaResumo;
+    res.json(armazem.guardarConfig(dados));
+  });
+
+  // --- Notificações push ---
+  app.get("/api/notificacoes", exigirLogin, (req, res) =>
+    res.json({ chavePublica: notificacoes.chavePublica, dispositivos: notificacoes.total() }),
+  );
+  app.post("/api/notificacoes/subscrever", exigirLogin, (req, res) => {
+    try {
+      res.json({ dispositivos: notificacoes.subscrever(req.body?.subscricao) });
+    } catch (erro) {
+      res.status(400).json({ erro: erro.message });
+    }
+  });
+  app.post("/api/notificacoes/teste", exigirLogin, async (req, res) => {
+    const nome = armazem.lerConfig().nomeAssistente || "Íris";
+    const enviadas = await notificacoes.enviarATodos({ titulo: `🔔 ${nome}`, corpo: "As notificações estão a funcionar!", url: "/" });
+    res.json({ enviadas });
+  });
+  app.notificacoes = notificacoes;
   app.get("/api/chamadas", exigirLogin, (req, res) => res.json(armazem.listarChamadas()));
 
   app.post("/api/sugerir", exigirLogin, async (req, res) => {
@@ -280,7 +304,12 @@ export function criarApp({ ia, armazem, notificador, senha = process.env.PAINEL_
     }
   });
 
-  app.get("/saude", (req, res) => res.json({ ok: true }));
+  // /saude também verifica os lembretes: um serviço grátis que abra este
+  // endereço a cada 5 min mantém o Render acordado e os avisos a horas.
+  app.get("/saude", (req, res) => {
+    notificacoes.verificar().catch((erro) => console.error("Notificações:", erro.message));
+    res.json({ ok: true });
+  });
   return app;
 }
 
@@ -298,7 +327,10 @@ export async function criarArmazemPorOmissao() {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const porta = Number(process.env.PORT) || 3000;
   const armazem = await criarArmazemPorOmissao();
-  const servidor = criarApp({ armazem }).listen(porta, () => console.log(`Assistente IA a correr em http://localhost:${porta}`));
+  const app = criarApp({ armazem });
+  const servidor = app.listen(porta, () => console.log(`Assistente IA a correr em http://localhost:${porta}`));
+  // Lembretes à hora certa e resumo da manhã.
+  setInterval(() => app.notificacoes.verificar().catch((erro) => console.error("Notificações:", erro.message)), 60_000);
   // Ao desligar (ex.: Render a reiniciar), acaba de gravar o que falta no Neon.
   process.on("SIGTERM", async () => {
     servidor.close();

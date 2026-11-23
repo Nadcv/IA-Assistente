@@ -23,6 +23,10 @@ Assistente pessoal com inteligência artificial (Gemini grátis ou Claude):
   PDFs, faturas e cartas: resume, transcreve, descreve, e cria o lembrete do
   prazo de pagamento sozinha. Vídeo, áudio e PDF precisam do Gemini (até 50 MB;
   a Google apaga-os ao fim de 48 h).
+- **🔔 Notificações.** Avisos à hora de cada tarefa e um resumo de manhã
+  (hora à escolha), como uma app. No iPhone (iOS 16.4+): Safari → Partilhar →
+  **Adicionar ao ecrã principal**, abrir a Íris pelo ícone, **Tarefas → Ativar
+  notificações**. As chaves (VAPID) são geradas sozinhas e guardadas no Neon.
 - **✅ Tarefas e lembretes.** Dizes "lembra-me amanhã às 9 de pagar a luz" e
   a tarefa é criada. Com **📅 Ligar ao calendário** (uma vez só), o telemóvel
   subscreve o calendário da Íris e as tarefas com data aparecem lá sozinhas,
@@ -130,6 +134,14 @@ Sem ela, a app usa ficheiros na pasta `data/`, que se apagam no plano grátis.
 - As tabelas (`dados` e `chamadas`) são criadas sozinhas no arranque.
 - Teste de integração (usa tabelas temporárias e apaga-as no fim):
   `node --env-file=.env.local --test test/neon.test.js`
+
+### Manter o Render grátis acordado (para os avisos chegarem a horas)
+
+O plano grátis do Render adormece ao fim de 15 min sem visitas, e a dormir não
+envia notificações. Cria um monitor grátis (por exemplo em uptimerobot.com,
+tipo HTTP, a cada 5 minutos) para `https://O-TEU-SERVIDOR/saude`. Cada visita
+mantém o servidor acordado e também verifica os lembretes. As 750 horas
+grátis por mês do Render chegam para um serviço sempre ligado.
 
 ### 2. Instalar o servidor
 

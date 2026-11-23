@@ -18,6 +18,9 @@ export const CONFIG_PADRAO = {
   soContactos: false,
   // Apaga chamadas guardadas há mais de X dias (privacidade).
   diasRetencao: 30,
+  // Notificações: resumo da manhã (hora de Lisboa).
+  resumoAtivo: true,
+  horaResumo: "08:00",
   // Para onde enviar o resumo de cada chamada (o teu telemóvel).
   numeroNotificacoes: "",
   // Estilo das sugestões de resposta para mensagens.

@@ -6,6 +6,11 @@
 <title>Assistente IA</title>
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" href="/icone.svg">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Íris">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0f172a">
 <style>
   :root { --bg:#0f172a; --card:#1e293b; --txt:#e2e8f0; --mut:#94a3b8; --ac:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; }
@@ -166,6 +171,12 @@
 
     <section id="tarefas" class="oculto">
       <div class="card">
+        <b>🔔 Notificações</b>
+        <p class="mut">A Íris avisa-te à hora de cada tarefa e manda um resumo de manhã, como uma app.</p>
+        <p id="estadoNotif" class="mut"></p>
+        <div class="linha"><button id="ativarNotif" class="prim">🔔 Ativar notificações</button><button id="testarNotif" class="oculto">Enviar teste</button></div>
+      </div>
+      <div class="card">
         <label for="novaTarefa">Nova tarefa</label>
         <input id="novaTarefa" placeholder="Ex.: Ligar ao canalizador">
         <label for="quandoTarefa">Quando (opcional)</label>
@@ -224,6 +235,9 @@
         <textarea id="bloqueados" rows="3" placeholder="+351 960 000 000"></textarea>
         <label for="diasRetencao">Apagar chamadas guardadas há mais de (dias)</label>
         <input id="diasRetencao" type="number" min="1" max="365">
+        <label class="interruptor" style="margin-top:14px"><input type="checkbox" id="resumoAtivo"> ☀️ Resumo da manhã (notificação)</label>
+        <label for="horaResumo">Hora do resumo</label>
+        <input id="horaResumo" type="time">
         <label for="numeroNotificacoes">O teu telemóvel, para receber o resumo por SMS</label>
         <input id="numeroNotificacoes" placeholder="+351912345678">
         <label for="estiloMensagens">Estilo das respostas às mensagens</label>
@@ -739,13 +753,14 @@ async function carregarChamadas() {
 $("#atualizar").onclick = carregarChamadas;
 
 // --- Definições ---
-const campos = ["nomeAssistente", "nomeDono", "instrucoes", "contactos", "bloqueados", "diasRetencao", "numeroNotificacoes", "estiloMensagens"];
+const campos = ["horaResumo", "nomeAssistente", "nomeDono", "instrucoes", "contactos", "bloqueados", "diasRetencao", "numeroNotificacoes", "estiloMensagens"];
 async function carregarConfig() {
   try {
     const c = await api("/api/config");
     campos.forEach((k) => $("#" + k).value = c[k] || "");
     $("#ativo").checked = !!c.ativo;
     $("#soContactos").checked = !!c.soContactos;
+    $("#resumoAtivo").checked = !!c.resumoAtivo;
     nomeAssistente = c.nomeAssistente || "Íris";
   } catch {}
 }
@@ -754,6 +769,7 @@ $("#formConfig").onsubmit = async (e) => {
   const dados = Object.fromEntries(campos.map((k) => [k, $("#" + k).value]));
   dados.ativo = $("#ativo").checked;
   dados.soContactos = $("#soContactos").checked;
+  dados.resumoAtivo = $("#resumoAtivo").checked;
   try { await api("/api/config", { method: "PUT", body: JSON.stringify(dados) }); $("#okConfig").textContent = "✅ Guardado"; }
   catch (err) { $("#okConfig").textContent = err.message; }
 };
@@ -924,6 +940,60 @@ $("#juntarMemoria").onclick = async () => {
   $("#novaMemoria").value = ""; carregarMemorias();
 };
 document.querySelector('nav button[data-sec="definicoes"]').addEventListener("click", carregarMemorias);
+
+// ---------- Notificações push ----------
+const emIOS = /iPhone|iPad/.test(navigator.userAgent);
+const instalada = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+function chaveParaBytes(base64) {
+  const b = atob((base64 + "=".repeat((4 - (base64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(b, (c) => c.charCodeAt(0));
+}
+async function estadoNotificacoes() {
+  const p = $("#estadoNotif");
+  if (emIOS && !instalada) {
+    p.replaceChildren("No iPhone, primeiro instala a app: no ", el("b", { textContent: "Safari" }),
+      " toca em Partilhar (□↑) → ", el("b", { textContent: "Adicionar ao ecrã principal" }),
+      ". Depois abre a Íris pelo ícone e volta aqui.");
+    $("#ativarNotif").classList.add("oculto");
+    return;
+  }
+  if (!("Notification" in window) || !("PushManager" in window)) {
+    p.textContent = "Este browser não suporta notificações. Usa o Safari (iPhone, com a app no ecrã principal) ou o Chrome.";
+    $("#ativarNotif").classList.add("oculto");
+    return;
+  }
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  const ativa = Notification.permission === "granted" && sub;
+  p.textContent = ativa ? "✅ Notificações ativas neste dispositivo." : Notification.permission === "denied"
+    ? "As notificações estão bloqueadas. Ativa-as nas definições do telemóvel (Notificações → Íris)." : "";
+  $("#ativarNotif").textContent = ativa ? "🔄 Voltar a ligar" : "🔔 Ativar notificações";
+  $("#testarNotif").classList.toggle("oculto", !ativa);
+}
+$("#ativarNotif").onclick = async () => {
+  try {
+    if ((await Notification.requestPermission()) !== "granted") { await estadoNotificacoes(); return; }
+    const { chavePublica } = await api("/api/notificacoes");
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chaveParaBytes(chavePublica) });
+    await api("/api/notificacoes/subscrever", { method: "POST", body: JSON.stringify({ subscricao: sub.toJSON() }) });
+    await estadoNotificacoes();
+  } catch (err) { $("#estadoNotif").textContent = "❌ " + err.message; }
+};
+$("#testarNotif").onclick = async () => {
+  try {
+    const r = await api("/api/notificacoes/teste", { method: "POST" });
+    $("#estadoNotif").textContent = r.enviadas ? "📨 Teste enviado — deve chegar em segundos." : "❌ Nenhum dispositivo recebeu. Toca em \"Voltar a ligar\".";
+  } catch (err) { $("#estadoNotif").textContent = "❌ " + err.message; }
+};
+document.querySelector('nav button[data-sec="tarefas"]').addEventListener("click", () => estadoNotificacoes().catch(() => {}));
+
+// Abrir num separador pelo endereço (ex.: ao tocar numa notificação: /?sec=tarefas).
+const secInicial = new URLSearchParams(location.search).get("sec");
+if (secInicial && document.querySelector(`nav button[data-sec="${CSS.escape(secInicial)}"]`)) {
+  setTimeout(() => document.querySelector(`nav button[data-sec="${CSS.escape(secInicial)}"]`).click(), 0);
+}
 
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
 mostrar();
